@@ -16,41 +16,63 @@ warnings.filterwarnings('ignore')
 df = pd.read_csv('/root/vynixmodelling/dataset/TSLA_original.csv')
 
 # %%
-# df.head()
 df.tail()
 
 # %%
-# Convert time column to datetime
-df['date'] = pd.to_datetime(df['time'], unit='s')
+# Exclude rows with NaN or null values
+non_null_df = df.dropna()
 
-# Filter data from Jan 1, 2012 onwards
-jan_1_2012_timestamp = pd.Timestamp('2012-01-01').timestamp()
-filtered_df = df[df['time'] >= jan_1_2012_timestamp]
+# Print total rows in the dataframe without NaN or null values
+print(f"Total rows in df without NaN or null values: {len(non_null_df)}")
 
-filtered_df.head()
-
-# %%
-import os
-
-# Buat direktori target jika belum ada
-target_dir = "/root/vynixmodelling/dataset"
-if not os.path.exists(target_dir):
-    os.makedirs(target_dir)
-    print(f"Directory created: {target_dir}")
-
-# Buat symbolic link
-symlink_path = "/dataset"
-if os.path.exists(symlink_path):
-    os.remove(symlink_path)
-    print(f"Removed existing symlink: {symlink_path}")
-
-os.symlink(target_dir, symlink_path)
-print(f"Symbolic link created: {symlink_path} -> {target_dir}")
+# Convert 'time' column to datetime format and print the first few rows
+non_null_df['time_converted'] = pd.to_datetime(non_null_df['time'], unit='s').dt.strftime('%d%m%Y')
+print(non_null_df[['time', 'time_converted']].head())
 
 # %%
-# Save the filtered dataframe to CSV
-filtered_df.to_csv('/root/vynixmodelling/dataset/TSLA_from_2012.csv', index=False)
-print("Data saved successfully to 'TSLA_from_2012.csv'")
+non_null_df.to_csv('/root/vynixmodelling/dataset/TSLA_non_null.csv', index=False)
+
+# %%
+non_null_df.head()
+
+# %%
+# # Convert time column to datetime
+# df['date'] = pd.to_datetime(df['time'], unit='s')
+
+# # Filter data from Jan 1, 2012 onwards
+# jan_1_2012_timestamp = pd.Timestamp('2012-01-01').timestamp()
+# filtered_df = df[df['time'] >= jan_1_2012_timestamp]
+
+# filtered_df.head()
+
+# %%
+filtered_df = non_null_df.copy()
+
+# %%
+print(f"Total rows in filtered_df: {len(filtered_df)}")
+
+# %%
+# import os
+
+# # Buat direktori target jika belum ada
+# target_dir = "/root/vynixmodelling/dataset"
+# if not os.path.exists(target_dir):
+#     os.makedirs(target_dir)
+#     print(f"Directory created: {target_dir}")
+
+# # Buat symbolic link
+# symlink_path = "/dataset"
+# if os.path.exists(symlink_path):
+#     os.remove(symlink_path)
+#     print(f"Removed existing symlink: {symlink_path}")
+
+# os.symlink(target_dir, symlink_path)
+# print(f"Symbolic link created: {symlink_path} -> {target_dir}")
+
+# %%
+# # Save the filtered dataframe to CSV
+# filtered_df.to_csv('/root/vynixmodelling/dataset/TSLA_from_2012.csv', index=False)
+# print("Data saved successfully to 'TSLA_from_2012.csv'")
 
 # %% [markdown]
 # ## Data Engineering
@@ -117,33 +139,35 @@ def triple_barrier_method(data, volatility_window=20, upper_barrier_multiplier=1
     Returns:
     - DataFrame with labels and barrier information
     """
-    # Ensure data is properly indexed
-    if 'date' in data.columns and not isinstance(data.index, pd.DatetimeIndex):
-        data['date'] = pd.to_datetime(data['date'])
-        data = data.set_index('date')
+    # Create a copy to avoid modifying original data
+    data_copy = data.copy()
+
+    # Ensure data has proper date column and index
+    if 'date' in data_copy.columns and not isinstance(data_copy.index, pd.DatetimeIndex):
+        data_copy['date'] = pd.to_datetime(data_copy['date'])
+        data_copy = data_copy.set_index('date')
     
     result = []
-    dates = data.index
     
     # Calculate daily returns based on close prices
-    returns = data['close'].pct_change().fillna(0)
+    returns = data_copy['close'].pct_change().fillna(0)
     
     # Calculate rolling volatility
     volatility = returns.rolling(window=volatility_window).std().fillna(method='bfill')
     
-    for i in range(len(data) - time_barrier_days - 1):  # -1 because we need room for D-1
+    for i in range(len(data_copy) - time_barrier_days - 1):  # -1 because we need room for D-1
         # D-1 is the decision point, D is the entry point
-        decision_date = dates[i]
-        entry_date = dates[i+1]  # D day is the actual entry
-        entry_price = data['close'].iloc[i]  # Use close price of D-1 as entry price
+        # Get actual datetime values from the index, not just the position
+        decision_date = data_copy.index[i]  # This is now the actual datetime
+        entry_date = data_copy.index[i+1]   # This is now the actual datetime
+        entry_price = data_copy['close'].iloc[i]  # Use close price of D-1 as entry price
         
         # Set dynamic barriers based on volatility
         upper_barrier = entry_price * (1 + volatility.iloc[i] * upper_barrier_multiplier)
         lower_barrier = entry_price * (1 - volatility.iloc[i] * lower_barrier_multiplier)
         
         # Define the window to look for barrier touches, starting from D (not D-1)
-        data_window = data.iloc[i+1:i+1+time_barrier_days]
-        date_window = dates[i+1:i+1+time_barrier_days]
+        data_window = data_copy.iloc[i+1:i+1+time_barrier_days]
         
         if len(data_window) == 0:
             continue  # Skip if we don't have enough data for the time window
@@ -168,28 +192,28 @@ def triple_barrier_method(data, volatility_window=20, upper_barrier_multiplier=1
         if upper_touch_idx is not None and (lower_touch_idx is None or upper_touch_idx < lower_touch_idx):
             label = 1  # Up - upper barrier touched first
             barrier_type = "upper"
-            touch_date = date_window[upper_touch_idx]
+            touch_date = data_window.index[upper_touch_idx]  # Actual datetime from index
             value_at_barrier = data_window['high'].iloc[upper_touch_idx]
         elif lower_touch_idx is not None:
             label = -1  # Down - lower barrier touched first
             barrier_type = "lower" 
-            touch_date = date_window[lower_touch_idx]
+            touch_date = data_window.index[lower_touch_idx]  # Actual datetime from index
             value_at_barrier = data_window['low'].iloc[lower_touch_idx]
         else:
             # Time barrier touched - ALWAYS label 0
             label = 0  # Neutral - vertical barrier touched first
             barrier_type = "time"
-            touch_date = date_window[-1] if len(date_window) > 0 else entry_date
+            touch_date = data_window.index[-1] if len(data_window) > 0 else entry_date  # Actual datetime from index
             value_at_barrier = data_window['close'].iloc[-1] if len(data_window) > 0 else entry_price
         
         # Calculate actual return (for information only, not used for labeling)
-        end_price = data.loc[touch_date, 'close']
+        end_price = data_copy.loc[touch_date, 'close']
         actual_return = (end_price - entry_price) / entry_price
         
         result.append({
-            'decision_date': decision_date,  # D-1 (when decision is made)
-            'entry_date': entry_date,       # D (when position is entered)
-            'end_date': touch_date,         # When barrier is touched
+            'decision_date': decision_date,  # D-1 (when decision is made) - actual datetime
+            'entry_date': entry_date,       # D (when position is entered) - actual datetime
+            'end_date': touch_date,         # When barrier is touched - actual datetime
             'entry_price': entry_price,     # Close price of D-1
             'end_price': end_price,         # Close price at barrier touch
             'return': actual_return,        # Actual return
@@ -204,9 +228,6 @@ def triple_barrier_method(data, volatility_window=20, upper_barrier_multiplier=1
 
 # Penggunaan kode:
 
-# Jika date belum diset sebagai indeks
-# filtered_df = filtered_df.set_index('date')
-
 # Aplikasikan Triple Barrier Method
 triple_barrier_df = triple_barrier_method(
     filtered_df,
@@ -217,7 +238,8 @@ triple_barrier_df = triple_barrier_method(
 )
 
 # Tampilkan hasil
-# print(triple_barrier_df.head())
+print("First few rows of triple_barrier_df:")
+print(triple_barrier_df.head())
 
 # Hitung distribusi label
 label_counts = triple_barrier_df['label'].value_counts()
@@ -228,7 +250,7 @@ print(f"Percentage DOWN: {label_counts.get(-1, 0)/len(triple_barrier_df)*100:.2f
 print(f"Percentage NEUTRAL: {label_counts.get(0, 0)/len(triple_barrier_df)*100:.2f}%")
 
 # %%
-triple_barrier_df.to_csv("triple_barrier_results.csv", index=False)
+triple_barrier_df.to_csv("triple_barrier_non_null.csv", index=False)
 
 # %%
 triple_barrier_df.columns
