@@ -1,0 +1,179 @@
+Processed Data Metadata
+========================
+Generated: 2025-09-08 02:24:10.208411
+Rows: 3330
+Columns: 167
+Date range: 2012-04-02 00:00:00 to 2025-06-30 00:00:00
+
+Columns:
+  1. time
+  2. open
+  3. high
+  4. low
+  5. close
+  6. Volume
+  7. Histogram
+  8. MACD
+  9. Signal
+ 10. K
+ 11. D
+ 12. Turnover (Cr)
+ 13. 10 MA Turnover
+ 14. Turnover / 10MA (X)
+ 15. datetime
+ 16. date
+ 17. AccountsPayableCurrent
+ 18. AccountsReceivableNetCurrent
+ 19. AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment
+ 20. AccumulatedOtherComprehensiveIncomeLossNetOfTax
+ 21. AdditionalPaidInCapitalCommonStock
+ 22. AllocatedShareBasedCompensationExpense
+ 23. Assets
+ 24. AssetsCurrent
+ 25. CashAndCashEquivalentsAtCarryingValue
+ 26. CommonStockValue
+ 27. ComprehensiveIncomeNetOfTax
+ 28. CostOfRevenue
+ 29. EmployeeRelatedLiabilitiesCurrent
+ 30. GrossProfit
+ 31. IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest
+ 32. IncomeTaxExpenseBenefit
+ 33. IncreaseDecreaseInAccountsPayableAndAccruedLiabilities
+ 34. IncreaseDecreaseInAccountsReceivable
+ 35. IncreaseDecreaseInOtherNoncurrentLiabilities
+ 36. IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets
+ 37. InterestCostsCapitalized
+ 38. InterestExpense
+ 39. InventoryNet
+ 40. InventoryWriteDown
+ 41. InvestmentIncomeInterest
+ 42. Liabilities
+ 43. LiabilitiesAndStockholdersEquity
+ 44. LiabilitiesCurrent
+ 45. NetCashProvidedByUsedInFinancingActivities
+ 46. NetCashProvidedByUsedInInvestingActivities
+ 47. NetCashProvidedByUsedInOperatingActivities
+ 48. NetIncomeLoss
+ 49. NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1
+ 50. NoncurrentAssets
+ 51. OperatingExpenses
+ 52. OperatingIncomeLoss
+ 53. OtherAssetsNoncurrent
+ 54. OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax
+ 55. OtherLiabilitiesNoncurrent
+ 56. OtherNonoperatingIncomeExpense
+ 57. PaymentsToAcquirePropertyPlantAndEquipment
+ 58. PrepaidExpenseAndOtherAssetsCurrent
+ 59. ProceedsFromIssuanceOfSharesUnderIncentiveAndShareBasedCompensationPlansIncludingStockOptions
+ 60. ProductWarrantyAccrualPreexistingIncreaseDecrease
+ 61. PropertyPlantAndEquipmentGross
+ 62. PropertyPlantAndEquipmentNet
+ 63. ResearchAndDevelopmentExpense
+ 64. RetainedEarningsAccumulatedDeficit
+ 65. Revenues
+ 66. SellingGeneralAndAdministrativeExpense
+ 67. ShareBasedCompensation
+ 68. StandardProductWarrantyAccrual
+ 69. StandardProductWarrantyAccrualPayments
+ 70. StandardProductWarrantyAccrualWarrantiesIssued
+ 71. StockholdersEquity
+ 72. TaxesPayableCurrent
+ 73. UnrecognizedTaxBenefits
+ 74. current_ratio
+ 75. quick_ratio
+ 76. cash_ratio
+ 77. working_capital
+ 78. accounts_receivable_turnover
+ 79. days_sales_outstanding
+ 80. inventory_turnover
+ 81. days_inventory_outstanding
+ 82. accounts_payable_turnover
+ 83. days_payable_outstanding
+ 84. cash_conversion_cycle
+ 85. gross_profit_margin
+ 86. operating_profit_margin
+ 87. net_profit_margin
+ 88. return_on_assets
+ 89. return_on_equity
+ 90. debt_to_equity_ratio
+ 91. debt_to_assets_ratio
+ 92. interest_coverage_ratio
+ 93. operating_expense_ratio
+ 94. rd_to_revenue_ratio
+ 95. sga_to_revenue_ratio
+ 96. fixed_asset_turnover
+ 97. total_asset_turnover
+ 98. capital_expenditure_ratio
+ 99. compensation_efficiency
+100. warranty_reserve_ratio
+101. depreciation_rate
+102. operating_cash_flow_to_net_income_ratio
+103. effective_tax_rate
+104. revenue_growth_rate
+105. net_income_growth_rate
+106. asset_growth_rate
+107. accrual_ratio
+108. cash_flow_to_revenue_ratio
+109. return_on_invested_capital
+110. cash_return_on_capital_invested
+111. fixed_assets_to_long_term_debt_ratio
+112. non_current_asset_turnover
+113. quarterly_gross_profit_stability
+114. revenue_to_expense_growth_differential
+115. quarterly_cash_flow_quality
+116. dividend_payout_ratio
+117. stock_based_compensation_to_operating_expense_ratio
+118. financial_leverage_index
+119. asset_coverage_ratio
+120. quarterly_margin_expansion
+121. asset_utilization_ratio
+122. capacity_utilization_proxy
+123. altman_z_score
+124. dupont_analysis_roe
+125. economic_value_added
+126. rd_efficiency_ratio
+127. innovation_investment_ratio
+128. revenue_momentum
+129. earnings_momentum
+130. quarterly_earnings_quality_index
+131. non_operating_items_ratio
+132. revenues_qoq_growth
+133. revenues_yoy_growth
+134. revenues_ttm
+135. revenues_acceleration
+136. revenues_seasonal_index
+137. revenues_moving_avg
+138. revenues_run_rate
+139. revenues_volatility
+140. revenues_seasonal_dependency
+141. net_income_qoq_growth
+142. net_income_yoy_growth
+143. net_income_ttm
+144. net_income_acceleration
+145. net_income_seasonal_index
+146. net_income_moving_avg
+147. net_income_run_rate
+148. net_income_volatility
+149. assets_qoq_growth
+150. assets_yoy_growth
+151. assets_ttm
+152. operating_income_qoq_growth
+153. operating_income_yoy_growth
+154. operating_income_ttm
+155. cash_qoq_growth
+156. cash_yoy_growth
+157. equity_qoq_growth
+158. equity_yoy_growth
+159. liabilities_qoq_growth
+160. liabilities_yoy_growth
+161. quarterly_operating_leverage
+162. quarterly_cash_burn_rate
+163. revenues_ytd
+164. netincomeloss_ytd
+165. operatingincomeloss_ytd
+166. long_term_revenue_cagr
+167. operating_margin_trend
+
+Data Quality:
+Missing values: 0
+Completeness: 100.00%

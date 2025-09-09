@@ -1,0 +1,405 @@
+## Metrik Likuiditas (Liquidity Ratios)
+
+1. **Current Ratio**
+   - Rumus: `AssetsCurrent / LiabilitiesCurrent`
+   - Deskripsi: Mengukur kemampuan perusahaan untuk membayar kewajiban jangka pendek dengan aset lancarnya.
+
+2. **Quick Ratio (Acid-Test)**
+   - Rumus: `(AssetsCurrent - InventoryNet) / LiabilitiesCurrent`
+   - Deskripsi: Mengukur kemampuan perusahaan membayar kewajiban jangka pendek tanpa mengandalkan persediaan.
+
+3. **Cash Ratio**
+   - Rumus: `CashAndCashEquivalentsAtCarryingValue / LiabilitiesCurrent`
+   - Deskripsi: Mengukur kemampuan perusahaan untuk melunasi kewajiban jangka pendek hanya dengan kas dan setara kas.
+
+4. **Working Capital**
+   - Rumus: `AssetsCurrent - LiabilitiesCurrent`
+   - Deskripsi: Menunjukkan dana operasional perusahaan yang tersedia setelah kewajiban jangka pendek terpenuhi.
+
+## Metrik Efisiensi (Efficiency Ratios)
+
+5. **Accounts Receivable Turnover**
+   - Rumus: `Revenues / AccountsReceivableNetCurrent`
+   - Deskripsi: Mengukur seberapa efektif perusahaan mengumpulkan piutangnya.
+
+6. **Days Sales Outstanding (DSO)**
+   - Rumus: `(AccountsReceivableNetCurrent / Revenues) * 365`
+   - Deskripsi: Mengukur rata-rata hari yang dibutuhkan untuk mengumpulkan piutang.
+
+7. **Inventory Turnover**
+   - Rumus: `CostOfRevenue / InventoryNet`
+   - Deskripsi: Mengukur efisiensi perusahaan dalam mengelola persediaan.
+
+8. **Days Inventory Outstanding (DIO)**
+   - Rumus: `(InventoryNet / CostOfRevenue) * 365`
+   - Deskripsi: Mengukur rata-rata hari persediaan tersimpan sebelum terjual.
+
+9. **Accounts Payable Turnover**
+   - Rumus: `CostOfRevenue / AccountsPayableCurrent`
+   - Deskripsi: Mengukur seberapa cepat perusahaan membayar pemasoknya.
+
+10. **Days Payable Outstanding (DPO)**
+    - Rumus: `(AccountsPayableCurrent / CostOfRevenue) * 365`
+    - Deskripsi: Mengukur rata-rata hari yang dibutuhkan perusahaan untuk membayar hutang dagang.
+
+11. **Cash Conversion Cycle**
+    - Rumus: `DSO + DIO - DPO`
+    - Deskripsi: Mengukur waktu yang dibutuhkan perusahaan untuk mengkonversi investasi dalam persediaan dan piutang menjadi kas.
+
+## Metrik Profitabilitas (Profitability Ratios)
+
+12. **Gross Profit Margin**
+    - Rumus: `GrossProfit / Revenues * 100`
+    - Deskripsi: Persentase pendapatan yang tersisa setelah memperhitungkan biaya produksi.
+
+13. **Operating Profit Margin**
+    - Rumus: `OperatingIncomeLoss / Revenues * 100`
+    - Deskripsi: Persentase pendapatan yang tersisa setelah memperhitungkan biaya operasional.
+
+14. **Net Profit Margin**
+    - Rumus: `NetIncomeLoss / Revenues * 100`
+    - Deskripsi: Persentase pendapatan yang tersisa sebagai laba bersih.
+
+15. **Return on Assets (ROA)**
+    - Rumus: `NetIncomeLoss / Assets * 100`
+    - Deskripsi: Mengukur efisiensi manajemen dalam menggunakan aset untuk menghasilkan laba.
+
+16. **Return on Equity (ROE)**
+    - Rumus: `NetIncomeLoss / StockholdersEquity * 100`
+    - Deskripsi: Mengukur profitabilitas perusahaan dalam hubungannya dengan ekuitas pemegang saham.
+
+## Metrik Struktur Modal (Solvency Ratios)
+
+17. **Debt to Equity Ratio**
+    - Rumus: `Liabilities / StockholdersEquity`
+    - Deskripsi: Mengukur seberapa besar perusahaan dibiayai oleh hutang dibandingkan ekuitas.
+
+18. **Debt to Assets Ratio**
+    - Rumus: `Liabilities / Assets`
+    - Deskripsi: Mengukur persentase aset yang dibiayai oleh hutang.
+
+19. **Interest Coverage Ratio**
+    - Rumus: `OperatingIncomeLoss / InvestmentIncomeInterest`
+    - Deskripsi: Mengukur kemampuan perusahaan membayar beban bunga dari pendapatan operasionalnya.
+
+## Metrik Efisiensi Operasional
+
+20. **Operating Expense Ratio**
+    - Rumus: `OperatingExpenses / Revenues * 100`
+    - Deskripsi: Mengukur efisiensi manajemen dalam menjalankan operasi perusahaan.
+
+21. **R&D to Revenue Ratio**
+    - Rumus: `ResearchAndDevelopmentExpense / Revenues * 100`
+    - Deskripsi: Mengukur investasi perusahaan dalam inovasi dan pengembangan produk.
+
+22. **SG&A to Revenue Ratio**
+    - Rumus: `SellingGeneralAndAdministrativeExpense / Revenues * 100`
+    - Deskripsi: Mengukur efisiensi dalam pengeluaran penjualan, umum, dan administrasi.
+
+## Metrik Investasi dan Pengembalian
+
+23. **Fixed Asset Turnover**
+    - Rumus: `Revenues / PropertyPlantAndEquipmentNet`
+    - Deskripsi: Mengukur efisiensi perusahaan dalam menggunakan aset tetap untuk menghasilkan pendapatan.
+
+24. **Total Asset Turnover**
+    - Rumus: `Revenues / Assets`
+    - Deskripsi: Mengukur efisiensi perusahaan dalam menggunakan seluruh asetnya untuk menghasilkan pendapatan.
+
+25. **Capital Expenditure Ratio**
+    - Rumus: `PaymentsToAcquirePropertyPlantAndEquipment / NetIncomeLoss`
+    - Deskripsi: Mengukur seberapa besar perusahaan menginvestasikan labanya kembali untuk aset tetap.
+
+## Metrik Khusus
+
+26. **Compensation Efficiency**
+    - Rumus: `AllocatedShareBasedCompensationExpense / Revenues * 100`
+    - Deskripsi: Mengukur efisiensi pemberian kompensasi berbasis saham dibandingkan dengan pendapatan.
+
+27. **Warranty Reserve Ratio**
+    - Rumus: `StandardProductWarrantyAccrual / Revenues * 100`
+    - Deskripsi: Mengukur persentase pendapatan yang dialokasikan untuk jaminan produk.
+
+28. **Depreciation Rate**
+    - Rumus: `AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment / PropertyPlantAndEquipmentGross * 100`
+    - Deskripsi: Mengukur tingkat penyusutan aset tetap perusahaan.
+
+29. **Operating Cash Flow to Net Income Ratio**
+    - Rumus: `(IncreaseDecreaseInAccountsReceivable + IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets) / NetIncomeLoss`
+    - Deskripsi: Mengukur kualitas pendapatan dengan membandingkan arus kas operasi dengan laba bersih.
+
+30. **Effective Tax Rate**
+    - Rumus: `IncomeTaxExpenseBenefit / IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest * 100`
+    - Deskripsi: Mengukur beban pajak efektif perusahaan sebagai persentase dari laba sebelum pajak.
+
+# Metrik Finansial Lanjutan
+
+## Metrik Pertumbuhan (Growth Metrics)
+
+31. **Revenue Growth Rate**
+   - Rumus: `(Revenues_current - Revenues_previous) / Revenues_previous * 100`
+   - Deskripsi: Mengukur persentase pertumbuhan pendapatan dibandingkan periode sebelumnya.
+
+32. **Net Income Growth Rate**
+   - Rumus: `(NetIncomeLoss_current - NetIncomeLoss_previous) / NetIncomeLoss_previous * 100`
+   - Deskripsi: Mengukur persentase pertumbuhan laba bersih dibandingkan periode sebelumnya.
+
+33. **Asset Growth Rate**
+   - Rumus: `(Assets_current - Assets_previous) / Assets_previous * 100`
+   - Deskripsi: Mengukur persentase pertumbuhan aset perusahaan.
+
+## Metrik Kualitas Laba (Earnings Quality)
+
+34. **Accrual Ratio**
+   - Rumus: `(NetIncomeLoss - (IncreaseDecreaseInAccountsReceivable + IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets)) / Assets`
+   - Deskripsi: Mengukur perbedaan antara laba yang dilaporkan dan arus kas, indikator kualitas laba.
+
+35. **Cash Flow to Revenue Ratio**
+   - Rumus: `(IncreaseDecreaseInAccountsReceivable + IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets) / Revenues`
+   - Deskripsi: Mengukur kemampuan perusahaan mengkonversi pendapatan menjadi arus kas.
+
+## Metrik Valuasi (Valuation Metrics)
+
+36. **Price to Book Ratio**
+   - Rumus: `Market_Price_per_Share / (StockholdersEquity / Outstanding_Shares)`
+   - Deskripsi: Membandingkan nilai pasar saham dengan nilai buku.
+
+37. **EV to EBITDA**
+   - Rumus: `Enterprise_Value / (OperatingIncomeLoss + AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment)`
+   - Deskripsi: Membandingkan nilai perusahaan dengan pendapatan sebelum bunga, pajak, depresiasi dan amortisasi.
+
+### Analisis Kuartalan (Quarterly Analysis)
+
+38. **Quarter-over-Quarter (QoQ) Growth**
+   - Rumus: `(Metric_current_quarter - Metric_previous_quarter) / Metric_previous_quarter * 100`
+   - Deskripsi: Mengukur pertumbuhan metrik dari kuarter sebelumnya.
+
+39. **Year-over-Year (YoY) Quarterly Growth**
+   - Rumus: `(Metric_current_quarter - Metric_same_quarter_previous_year) / Metric_same_quarter_previous_year * 100`
+   - Deskripsi: Membandingkan pertumbuhan dengan kuarter yang sama tahun sebelumnya.
+
+40. **Trailing Twelve Months (TTM)**
+   - Rumus: `Sum of metric for last 4 quarters`
+   - Deskripsi: Menjumlahkan metrik selama 12 bulan terakhir, berguna untuk menghilangkan efek musiman.
+
+41. **Quarterly Acceleration/Deceleration**
+   - Rumus: `QoQ_Growth_current - QoQ_Growth_previous`
+   - Deskripsi: Mengukur apakah pertumbuhan kuartalan meningkat atau melambat.
+
+### Analisis Musiman (Seasonal Analysis)
+
+42. **Seasonal Index**
+   - Rumus: `Metric_quarter / Average_of_metric_for_last_4_quarters`
+   - Deskripsi: Mengidentifikasi pola musiman dalam data kuartalan.
+
+43. **Seasonal Growth Rate**
+   - Rumus: `(Metric_current_quarter - Metric_same_quarter_previous_year) / Metric_same_quarter_previous_year * 100`
+   - Deskripsi: Mengukur pertumbuhan dengan mempertimbangkan faktor musiman.
+
+### Analisis Tren (Trend Analysis)
+
+44. **Sequential Quarter Analysis**
+   - Rumus: `(Q1 + Q2) / (Q3_previous_year + Q4_previous_year)`
+   - Deskripsi: Membandingkan kinerja semester pertama dengan semester kedua tahun sebelumnya.
+
+45. **Quarter Contribution Ratio**
+   - Rumus: `Metric_quarter / Sum_of_metric_for_full_year * 100`
+   - Deskripsi: Menunjukkan kontribusi kuarter tertentu terhadap kinerja tahunan.
+
+46. **Moving Average (4-Quarter)**
+   - Rumus: `(Metric_Q1 + Metric_Q2 + Metric_Q3 + Metric_Q4) / 4`
+   - Deskripsi: Rata-rata bergerak 4 kuarter untuk mengidentifikasi tren jangka panjang.
+
+### Proyeksi dan Forecast
+
+47. **Quarter Run Rate**
+   - Rumus: `Metric_current_quarter * 4`
+   - Deskripsi: Memproyeksikan kinerja tahunan berdasarkan kuarter saat ini.
+
+48. **Weighted Quarterly Forecast**
+   - Rumus: `(Metric_Q1 * 0.1) + (Metric_Q2 * 0.2) + (Metric_Q3 * 0.3) + (Metric_Q4_estimate * 0.4)`
+   - Deskripsi: Memproyeksi hasil akhir tahun dengan memberikan bobot lebih pada kuarter terbaru.
+
+### Rasio Operasional Kuartalan
+
+49. **Quarterly Operating Leverage**
+   - Rumus: `(OperatingIncomeLoss_QoQ_growth) / (Revenues_QoQ_growth)`
+   - Deskripsi: Mengukur seberapa besar perubahan pendapatan memengaruhi laba operasional.
+
+50. **Quarterly Cash Burn Rate**
+   - Rumus: `(CashAndCashEquivalentsAtCarryingValue_beginning - CashAndCashEquivalentsAtCarryingValue_ending) / 3`
+   - Deskripsi: Tingkat penggunaan kas per bulan dalam kuarter.
+
+### Analisis Kinerja Kumulatif
+
+51. **Year-to-Date (YTD) Performance**
+   - Rumus: `Sum of metrics from Q1 to current quarter`
+   - Deskripsi: Mengukur kinerja kumulatif sejak awal tahun fiskal.
+
+52. **YTD Comparison**
+   - Rumus: `(YTD_current_year - YTD_previous_year) / YTD_previous_year * 100`
+   - Deskripsi: Membandingkan kinerja YTD dengan periode yang sama tahun sebelumnya.
+
+### Metrik Variabilitas
+
+53. **Quarterly Volatility**
+   - Rumus: `Standard deviation of QoQ growth rates over last 8 quarters`
+   - Deskripsi: Mengukur stabilitas atau volatilitas kinerja kuartalan.
+
+54. **Seasonal Dependency Index**
+   - Rumus: `Max quarterly variation / Average quarterly value * 100`
+   - Deskripsi: Mengukur tingkat ketergantungan bisnis pada musim tertentu.
+
+### Indikator Kesehatan Keuangan Kuartalan
+
+55. **Z-Score Quarterly Trend**
+   - Rumus: Penerapan Z-Score Altman pada data kuartalan untuk melihat tren kesehatan keuangan
+   - Deskripsi: Mengidentifikasi tren dalam risiko kebangkrutan perusahaan berdasarkan perubahan kuartalan.
+
+56. **Quarterly Working Capital Efficiency**
+   - Rumus: `(Working_Capital_current / Revenues_current) / (Working_Capital_previous / Revenues_previous)`
+   - Deskripsi: Membandingkan efisiensi modal kerja dari kuarter ke kuarter.
+
+### Analisis Momentum
+
+57. **Revenue Momentum**
+   - Rumus: `(Revenues_Q2 - Revenues_Q1) / (Revenues_Q1 - Revenues_Q4_previous_year)`
+   - Deskripsi: Mengukur apakah momentum pertumbuhan pendapatan meningkat atau menurun.
+
+58. **Earnings Momentum**
+   - Rumus: `(NetIncomeLoss_Q2 - NetIncomeLoss_Q1) / (NetIncomeLoss_Q1 - NetIncomeLoss_Q4_previous_year)`
+   - Deskripsi: Mengukur apakah momentum pertumbuhan laba meningkat atau menurun.
+
+### Metrik Kualitas Pendapatan
+
+59. **Quarterly Earnings Quality Index**
+   - Rumus: `((OperatingIncomeLoss - NetIncomeLoss) / Revenues)_current_quarter / ((OperatingIncomeLoss - NetIncomeLoss) / Revenues)_previous_quarter`
+   - Deskripsi: Mengukur perubahan dalam kualitas pendapatan dari kuarter ke kuarter.
+
+60. **Non-Operating Items Ratio**
+   - Rumus: `(NetIncomeLoss - OperatingIncomeLoss) / NetIncomeLoss * 100`
+   - Deskripsi: Mengukur persentase laba bersih yang berasal dari aktivitas non-operasional.
+
+## Metrik Efisiensi Modal dan Investasi
+
+61. **Return on Invested Capital (ROIC)**
+   - Rumus: `(OperatingIncomeLoss * (1 - Tax_Rate)) / (Assets - LiabilitiesCurrent)`
+   - Deskripsi: Mengukur efisiensi perusahaan dalam mengalokasikan modal untuk investasi produktif.
+
+62. **Cash Return on Capital Invested (CROCI)**
+   - Rumus: `(IncreaseDecreaseInAccountsReceivable + IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets) / (Assets - LiabilitiesCurrent)`
+   - Deskripsi: Mengukur arus kas yang dihasilkan relatif terhadap modal yang diinvestasikan.
+
+## Metrik Efisiensi Manajemen Aset
+
+63. **Fixed Assets to Long-term Debt Ratio**
+   - Rumus: `PropertyPlantAndEquipmentNet / (Liabilities - LiabilitiesCurrent)`
+   - Deskripsi: Mengukur seberapa besar aset tetap didanai oleh hutang jangka panjang.
+
+64. **Non-Current Asset Turnover**
+   - Rumus: `Revenues / (Assets - AssetsCurrent)`
+   - Deskripsi: Mengukur efisiensi perusahaan dalam menggunakan aset jangka panjang.
+
+## Metrik Analisis Lanjutan Kuartalan
+
+65. **Quarterly Gross Profit Stability**
+   - Rumus: `Standard deviation of (GrossProfit / Revenues) for last 8 quarters`
+   - Deskripsi: Mengukur stabilitas margin kotor perusahaan antar kuarter.
+
+66. **Revenue to Expense Growth Differential**
+   - Rumus: `(Revenues_growth_rate - OperatingExpenses_growth_rate)`
+   - Deskripsi: Mengukur selisih antara pertumbuhan pendapatan dan pertumbuhan biaya.
+
+67. **Quarterly Cash Flow Quality**
+   - Rumus: `Standard deviation of (CashFlow_from_Operations / NetIncomeLoss) for last 8 quarters`
+   - Deskripsi: Mengukur konsistensi kualitas arus kas perusahaan.
+
+## Metrik Kebijakan Dividen dan Saham
+
+68. **Dividend Payout Ratio**
+   - Rumus: `Dividends_Declared / NetIncomeLoss * 100`
+   - Deskripsi: Mengukur persentase laba yang dibagikan sebagai dividen.
+
+69. **Stock-Based Compensation to Operating Expense Ratio**
+   - Rumus: `ShareBasedCompensation / OperatingExpenses * 100`
+   - Deskripsi: Mengukur persentase biaya operasional yang berupa kompensasi berbasis saham.
+
+## Metrik Analisis Tren Jangka Panjang
+
+70. **Long-term Revenue CAGR**
+   - Rumus: `(Revenues_current / Revenues_n_years_ago)^(1/n) - 1 * 100`
+   - Deskripsi: Mengukur tingkat pertumbuhan tahunan gabungan pendapatan selama n tahun.
+
+71. **Operating Margin Trend**
+   - Rumus: Slope dari grafik `OperatingIncomeLoss / Revenues * 100` selama beberapa kuarter
+   - Deskripsi: Menganalisis arah perubahan margin operasi dari waktu ke waktu.
+
+## Metrik Risiko dan Keberlanjutan
+
+72. **Financial Leverage Index**
+   - Rumus: `(Liabilities / Assets)_current / (Liabilities / Assets)_previous`
+   - Deskripsi: Mengukur perubahan dalam tingkat penggunaan hutang perusahaan.
+
+73. **Asset Coverage Ratio**
+   - Rumus: `(Assets - LiabilitiesCurrent) / (Liabilities - LiabilitiesCurrent)`
+   - Deskripsi: Mengukur kemampuan perusahaan untuk melunasi hutang jangka panjang dengan asetnya.
+
+## Metrik Analisis Kuartalan Spesifik
+
+74. **Quarterly Earnings Surprise**
+   - Rumus: `(NetIncomeLoss_actual - NetIncomeLoss_estimated) / NetIncomeLoss_estimated * 100`
+   - Deskripsi: Mengukur seberapa besar laba aktual menyimpang dari proyeksi.
+
+75. **Quarterly Margin Expansion/Contraction**
+   - Rumus: `(NetIncomeLoss / Revenues)_current_quarter - (NetIncomeLoss / Revenues)_previous_quarter`
+   - Deskripsi: Mengukur perubahan margin bersih antarkuarter.
+
+## Metrik Penggunaan Kapasitas
+
+76. **Asset Utilization Ratio**
+   - Rumus: `Revenues / ((Assets_beginning + Assets_ending) / 2)`
+   - Deskripsi: Mengukur efisiensi perusahaan dalam menghasilkan pendapatan dari asetnya.
+
+77. **Capacity Utilization Proxy**
+   - Rumus: `CostOfRevenue / (PropertyPlantAndEquipmentNet * Industry_capacity_factor)`
+   - Deskripsi: Estimasi penggunaan kapasitas produksi perusahaan.
+
+## Metrik Perbandingan Antarsektor
+
+78. **Sector Relative Performance**
+   - Rumus: `(Metric_company / Metric_company_previous) / (Metric_sector / Metric_sector_previous)`
+   - Deskripsi: Membandingkan pertumbuhan perusahaan dengan pertumbuhan sektornya.
+
+79. **Industry-adjusted ROA**
+   - Rumus: `(NetIncomeLoss / Assets) - Industry_average_ROA`
+   - Deskripsi: Mengevaluasi ROA perusahaan relatif terhadap rata-rata industri.
+
+## Metrik Prediktif
+
+80. **Probability of Financial Distress (Altman Z-Score)**
+   - Rumus: `1.2*(Working_Capital/Assets) + 1.4*(RetainedEarningsAccumulatedDeficit/Assets) + 3.3*(OperatingIncomeLoss/Assets) + 0.6*(StockholdersEquity/Liabilities) + 0.999*(Revenues/Assets)`
+   - Deskripsi: Prediksi risiko kebangkrutan perusahaan.
+
+81. **Beneish M-Score**
+   - Rumus: Kombinasi dari 8 rasio keuangan untuk mendeteksi manipulasi laba
+   - Deskripsi: Mengidentifikasi kemungkinan manipulasi laporan keuangan.
+
+## Metrik Komposit
+
+82. **DuPont Analysis (Extended)**
+   - Rumus: `(NetIncomeLoss/Revenues) * (Revenues/Assets) * (Assets/StockholdersEquity)`
+   - Deskripsi: Analisis komprehensif ROE menjadi tiga komponen utama.
+
+83. **Economic Value Added (EVA)**
+   - Rumus: `OperatingIncomeLoss * (1 - Tax_Rate) - (WACC * Invested_Capital)`
+   - Deskripsi: Mengukur nilai ekonomis yang diciptakan setelah memperhitungkan biaya modal.
+
+## Metrik Spesifik Industri Teknologi
+
+84. **R&D Efficiency Ratio**
+   - Rumus: `GrossProfit / ResearchAndDevelopmentExpense`
+   - Deskripsi: Mengukur efektivitas investasi R&D dalam menghasilkan laba kotor.
+
+85. **Innovation Investment Ratio**
+   - Rumus: `(ResearchAndDevelopmentExpense + PaymentsToAcquirePropertyPlantAndEquipment) / Revenues * 100`
+   - Deskripsi: Mengukur total investasi untuk inovasi dan pengembangan kapasitas.
