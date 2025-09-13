@@ -1,0 +1,40 @@
+Model: xgb_single
+Test Set Size: 665
+Test Date: 2025-09-11 08:21:24.472367
+
+=== METRICS ===
+accuracy: 0.9263
+f1_macro: 0.7285
+f1_weighted: 0.9140
+f1_micro: 0.9263
+precision_macro: 0.8690
+precision_weighted: 0.9196
+recall_macro: 0.7041
+recall_weighted: 0.9263
+roc_auc_ovr: 0.9126
+roc_auc_ovo: 0.8853
+f1_class_0: 0.9412
+precision_class_0: 0.9297
+recall_class_0: 0.9530
+f1_class_1: 0.2927
+precision_class_1: 0.7500
+recall_class_1: 0.1818
+f1_class_2: 0.9518
+precision_class_2: 0.9273
+recall_class_2: 0.9776
+
+=== CLASSIFICATION REPORT ===
+              precision    recall  f1-score   support
+
+           0       0.93      0.95      0.94       319
+           1       0.75      0.18      0.29        33
+           2       0.93      0.98      0.95       313
+
+    accuracy                           0.93       665
+   macro avg       0.87      0.70      0.73       665
+weighted avg       0.92      0.93      0.91       665
+
+=== CONFUSION MATRIX ===
+[[304   2  13]
+ [ 16   6  11]
+ [  7   0 306]]

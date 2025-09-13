@@ -1,0 +1,16 @@
+{
+  "data_shape": [
+    3324,
+    178
+  ],
+  "label_distribution": {
+    "-1": 1513,
+    "0": 124,
+    "1": 1687
+  },
+  "missing_values": {},
+  "feature_types": {
+    "numeric": 173,
+    "categorical": 5
+  }
+}

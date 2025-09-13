@@ -1,0 +1,12 @@
+accuracy_mean: 0.8505
+accuracy_std: 0.0326
+f1_macro_mean: 0.6644
+f1_macro_std: 0.0283
+f1_weighted_mean: 0.8772
+f1_weighted_std: 0.0179
+precision_macro_mean: 0.7046
+precision_macro_std: 0.0730
+recall_macro_mean: 0.7261
+recall_macro_std: 0.0646
+roc_auc_mean: 0.9109
+roc_auc_std: 0.0260

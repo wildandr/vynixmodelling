@@ -1,0 +1,6 @@
+shape: (3324, 178)
+columns: 178
+numeric_features: 173
+categorical_features: 4
+missing_values: 0
+label_distribution: {-1: 1513, 0: 124, 1: 1687}
