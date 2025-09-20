@@ -303,14 +303,14 @@ def apply_feature_engineering(pivoted_df, ticker):
         if completeness >= threshold:
             complete_columns.append(col)
 
-    print(f'Kolom dengan data lengkap (>= {threshold*100}%): {len(complete_columns)}')
-    # print(f'Kolom: {complete_columns[:10]}...')  # Tampilkan 10 pertama
+    logging.info(f'Kolom dengan data lengkap (>= {threshold*100}%): {len(complete_columns)}')
+    # logging.info(f'Kolom: {complete_columns[:10]}...')  # Tampilkan 10 pertama
 
     incomplete_columns = [col for col in pivoted_df.columns if col not in complete_columns]
     if incomplete_columns:
-        print(f'Kolom dengan data tidak lengkap (kurang dari {threshold*100}%): {len(incomplete_columns)}')
-        # print(f'Kolom: {incomplete_columns[:10]}...')  # Tampilkan 10 pertama
-        # print('Alasan: Data completeness di bawah ambang batas yang ditentukan.')
+        logging.info(f'Kolom dengan data tidak lengkap (kurang dari {threshold*100}%): {len(incomplete_columns)}')
+        # logging.info(f'Kolom: {incomplete_columns[:10]}...')  # Tampilkan 10 pertama
+        # logging.info('Alasan: Data completeness di bawah ambang batas yang ditentukan.')
 
     # Buat filtered_df dengan kolom yang memiliki data lengkap
     filtered_df = pivoted_df[complete_columns].copy()
@@ -318,8 +318,8 @@ def apply_feature_engineering(pivoted_df, ticker):
     # Fill missing values dengan forward fill dan backward fill
     filtered_df = filtered_df.fillna(method='ffill').fillna(method='bfill')
 
-    print(f'\nFiltered DataFrame shape: {filtered_df.shape}')
-    print(f'Data completeness setelah filtering: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
+    logging.info(f'\nFiltered DataFrame shape: {filtered_df.shape}')
+    logging.info(f'Data completeness setelah filtering: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
 
     # Terapkan 85 fungsi feature engineering
     enhanced_df = filtered_df.copy()
@@ -420,15 +420,15 @@ def apply_feature_engineering(pivoted_df, ticker):
     ]
 
     # Terapkan fungsi-fungsi feature engineering
-    # print('\nMenerapkan feature engineering functions...')
+    # logging.info('\nMenerapkan feature engineering functions...')
 
     # Fungsi dasar
     for name, func in feature_functions:
         try:
             enhanced_df[name] = func(enhanced_df)
-            # print(f'✓ {name}')
+            # logging.info(f'✓ {name}')
         except Exception as e:
-            # print(f'✗ {name}: {str(e)} - Gagal menghitung fitur ini.')
+            # logging.info(f'✗ {name}: {str(e)} - Gagal menghitung fitur ini.')
             pass
 
     # Fungsi berbasis kolom
@@ -436,27 +436,27 @@ def apply_feature_engineering(pivoted_df, ticker):
         try:
             if column in enhanced_df.columns:
                 enhanced_df[name] = func(enhanced_df, column)
-                # print(f'✓ {name}')
+                # logging.info(f'✓ {name}')
             else:
-                # print(f'✗ {name}: Column {column} not found')
+                # logging.info(f'✗ {name}: Column {column} not found')
                 pass
         except Exception as e:
-            # print(f'✗ {name}: {str(e)} - Gagal menghitung fitur ini.')
+            # logging.info(f'✗ {name}: {str(e)} - Gagal menghitung fitur ini.')
             pass
 
     # Fungsi khusus
     try:
         enhanced_df['quarterly_operating_leverage'] = quarterly_operating_leverage(enhanced_df)
-        # print('✓ quarterly_operating_leverage')
+        # logging.info('✓ quarterly_operating_leverage')
     except Exception as e:
-        # print(f'✗ quarterly_operating_leverage: {str(e)}')
+        # logging.info(f'✗ quarterly_operating_leverage: {str(e)}')
         pass
 
     try:
         enhanced_df['quarterly_cash_burn_rate'] = quarterly_cash_burn_rate(enhanced_df)
-        # print('✓ quarterly_cash_burn_rate')
+        # logging.info('✓ quarterly_cash_burn_rate')
     except Exception as e:
-        # print(f'✗ quarterly_cash_burn_rate: {str(e)}')
+        # logging.info(f'✗ quarterly_cash_burn_rate: {str(e)}')
         pass
 
     # Fungsi YTD untuk beberapa kolom utama
@@ -465,38 +465,38 @@ def apply_feature_engineering(pivoted_df, ticker):
         try:
             if col in enhanced_df.columns:
                 enhanced_df[f'{col.lower()}_ytd'] = ytd_performance(enhanced_df, col)
-                # print(f'✓ {col.lower()}_ytd')
+                # logging.info(f'✓ {col.lower()}_ytd')
         except Exception as e:
-            # print(f'✗ {col.lower()}_ytd: {str(e)}')
+            # logging.info(f'✗ {col.lower()}_ytd: {str(e)}')
             pass
 
     # Fungsi CAGR
     try:
         enhanced_df['long_term_revenue_cagr'] = long_term_revenue_cagr(enhanced_df)
-        # print('✓ long_term_revenue_cagr')
+        # logging.info('✓ long_term_revenue_cagr')
     except Exception as e:
-        # print(f'✗ long_term_revenue_cagr: {str(e)}')
+        # logging.info(f'✗ long_term_revenue_cagr: {str(e)}')
         pass
 
     # Fungsi trend
     try:
         enhanced_df['operating_margin_trend'] = operating_margin_trend(enhanced_df)
-        # print('✓ operating_margin_trend')
+        # logging.info('✓ operating_margin_trend')
     except Exception as e:
-        # print(f'✗ operating_margin_trend: {str(e)}')
+        # logging.info(f'✗ operating_margin_trend: {str(e)}')
         pass
 
     # Replace infinite values dengan NaN
     enhanced_df = enhanced_df.replace([np.inf, -np.inf], np.nan)
 
-    print(f'\nEnhanced DataFrame shape: {enhanced_df.shape}')
-    print(f'Jumlah fitur asli: {len(complete_columns)}')
-    print(f'Jumlah fitur baru: {enhanced_df.shape[1] - len(complete_columns)}')
-    print(f'Total fitur: {enhanced_df.shape[1]}')
+    logging.info(f'\nEnhanced DataFrame shape: {enhanced_df.shape}')
+    logging.info(f'Jumlah fitur asli: {len(complete_columns)}')
+    logging.info(f'Jumlah fitur baru: {enhanced_df.shape[1] - len(complete_columns)}')
+    logging.info(f'Total fitur: {enhanced_df.shape[1]}')
 
     # Tampilkan statistik
-    print('\nStatistik Enhanced DataFrame:')
-    print(f'Data completeness: {(enhanced_df.count().sum() / (len(enhanced_df) * len(enhanced_df.columns)) * 100):.2f}%')
+    logging.info('\nStatistik Enhanced DataFrame:')
+    logging.info(f'Data completeness: {(enhanced_df.count().sum() / (len(enhanced_df) * len(enhanced_df.columns)) * 100):.2f}%')
 
     # Identifikasi kolom yang tidak lengkap di enhanced_df
     incomplete_enhanced_columns = []
@@ -506,33 +506,33 @@ def apply_feature_engineering(pivoted_df, ticker):
             incomplete_enhanced_columns.append(col)
 
     if incomplete_enhanced_columns:
-        print(f'Kolom dengan data tidak lengkap di Enhanced DataFrame: {len(incomplete_enhanced_columns)}')
-        # print(f'Kolom: {incomplete_enhanced_columns[:10]}...') # Tampilkan 10 pertama
-        # print('\nDetail kolom kosong pada Enhanced DataFrame:')
+        logging.info(f'Kolom dengan data tidak lengkap di Enhanced DataFrame: {len(incomplete_enhanced_columns)}')
+        # logging.info(f'Kolom: {incomplete_enhanced_columns[:10]}...') # Tampilkan 10 pertama
+        # logging.info('\nDetail kolom kosong pada Enhanced DataFrame:')
         for col in incomplete_enhanced_columns:
             empty_quarters = enhanced_df[enhanced_df[col].isna()].index.tolist()
             if empty_quarters:
-                # print(f"kosong '{col}' {empty_quarters}")
+                # logging.info(f"kosong '{col}' {empty_quarters}")
                 # Filter empty_quarters dari 2012-Q1 dan seterusnya
                 filtered_empty_quarters = [q for q in empty_quarters if q > '2012-Q1']
                 if filtered_empty_quarters:
-                    print(f"q >= '2012-Q1' '{col}' {filtered_empty_quarters}")
+                    logging.info(f"q >= '2012-Q1' '{col}' {filtered_empty_quarters}")
                 else:
                     pass
 
     # Tampilkan sample data
-    # print('\nSample enhanced data (first 5 rows, last 10 columns):')
-    # print(enhanced_df.iloc[:5, -10:])
+    # logging.info('\nSample enhanced data (first 5 rows, last 10 columns):')
+    # logging.info(enhanced_df.iloc[:5, -10:])
 
     # Simpan enhanced dataframe
     enhanced_filename = f'/root/vynixmodelling/dataset/data_fundamental/{ticker}_enhanced_features.csv'
     enhanced_df.to_csv(enhanced_filename)
-    print(f'\nEnhanced DataFrame saved to: {enhanced_filename}')
+    logging.info(f'\nEnhanced DataFrame saved to: {enhanced_filename}')
     
     # Filter DataFrame untuk kuartal setelah 2012-Q1
     filtered_quarters = [q for q in enhanced_df.index if q > '2012-Q1']
     enhanced_df = enhanced_df.loc[filtered_quarters]
-    print(f'DataFrame setelah filter q > 2012-Q1: {enhanced_df.shape}')
-    print(f'Data completeness: {(enhanced_df.count().sum() / (len(enhanced_df) * len(enhanced_df.columns)) * 100):.2f}%')
+    logging.info(f'DataFrame setelah filter q > 2012-Q1: {enhanced_df.shape}')
+    logging.info(f'Data completeness: {(enhanced_df.count().sum() / (len(enhanced_df) * len(enhanced_df.columns)) * 100):.2f}%')
 
     return enhanced_df

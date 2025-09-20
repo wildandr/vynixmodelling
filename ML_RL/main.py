@@ -5,6 +5,13 @@ import logging
 from utils.get_ticker import *
 from utils.load_data import *
 from fundamental_feature_engineering import *
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
+import joblib
+import time
+import optuna
+from triple_barrier.triplebarrier import apply_triple_barrier_labeling
 
 logging.basicConfig(level=logging.INFO)
 warnings.filterwarnings('ignore')
@@ -30,11 +37,11 @@ logging.info(f"Total rows in df without NaN or null values: {len(non_null_df)}")
 # Convert 'time' column to datetime format and print the first few rows
 non_null_df['time_converted'] = pd.to_datetime(non_null_df['time'], unit='s').dt.strftime('%d%m%Y')
 # print(non_null_df[['time', 'time_converted']].head(1))
-print(non_null_df.head)
-print(non_null_df.tail)
-print(non_null_df.info())
-print(non_null_df.describe())
-print(non_null_df.columns)
+# print(non_null_df.head)
+# print(non_null_df.tail)
+# print(non_null_df.info())
+# print(non_null_df.describe())
+# print(non_null_df.columns)
 
 # Data Gathering with Fundamental data
 # 1. Process Fundamental Data from Local Files
@@ -43,14 +50,14 @@ pivoted_df = process_fundamental_data_local("TSLA")
 
 # Jika gagal memuat dari lokal, fallback ke API
 if pivoted_df is None:
-    print("Fallback to API method...")
+    logging.info("Fallback to API method...")
     fundamental_data = get_fundamental_data("TSLA")
     pivoted_df = process_fundamental_data(fundamental_data, "TSLA")
-    print("Data loaded from API successfully")
+    logging.info("Data loaded from API successfully")
 else:
     # Baca kembali CSV yang sudah diproses untuk mendapatkan DataFrame
     pivoted_df = pd.read_csv('/root/vynixmodelling/dataset/data_fundamental/TSLA_time.csv', index_col=0)
-    print(f"Data loaded from local files successfully: {pivoted_df.shape}")
+    logging.info(f"Data loaded from local files successfully: {pivoted_df.shape}")
 
 # 3. Fundamental Data Financial Feature Engineering
 from fundamental_feature_engineering import apply_feature_engineering
@@ -76,12 +83,12 @@ logging.info(f"Data processing completed: {filtered_df.shape}")
 logging.info(f"Processed data saved to: {output_path}")
 
 # Display final results
-print(f"\nFinal processed data shape: {filtered_df.shape}")
-print(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
-print(f"Technical columns: {len([col for col in filtered_df.columns if any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
-print(f"Fundamental columns: {len([col for col in filtered_df.columns if col not in ['time', 'date', 'datetime'] and not any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
-print("\nPreprocessing completed successfully!")
-print(f'Data completeness: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
+logging.info(f"\nFinal processed data shape: {filtered_df.shape}")
+logging.info(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
+logging.info(f"Technical columns: {len([col for col in filtered_df.columns if any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
+logging.info(f"Fundamental columns: {len([col for col in filtered_df.columns if col not in ['time', 'date', 'datetime'] and not any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
+logging.info("\nPreprocessing completed successfully!")
+logging.info(f'Data completeness: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
 
 # 5. Implementasi Labelling Triple Barrier Method ke filtered_df
 # Semua parameter di init di file ini. main.py.
@@ -106,7 +113,7 @@ VISUALIZATION_PARAMS = {
     'verbose': True                    # Tampilkan log proses
 }
 
-print("\n=== Applying Triple Barrier Method ===")
+logging.info("\n=== Applying Triple Barrier Method ===")
 logging.info("Starting Triple Barrier Method labeling...")
 
 # Aplikasikan Triple Barrier Method
@@ -120,7 +127,7 @@ triple_barrier_output_path = '/root/vynixmodelling/ML_RL/triple_barrier_results.
 triple_barrier_df.to_csv(triple_barrier_output_path, index=False)
 
 # Generate visualisasi Triple Barrier
-print("\n=== Generating Triple Barrier Visualizations ===")
+logging.info("\n=== Generating Triple Barrier Visualizations ===")
 logging.info("Generating Triple Barrier visualizations...")
 
 visualization_files = generate_triple_barrier_visualizations(
@@ -133,9 +140,9 @@ logging.info(f"Visualizations generated: {len(visualization_files)} files")
 for file_type, file_path in visualization_files.items():
     logging.info(f"{file_type}: {file_path}")
 
-print(f"\n=== Triple Barrier Implementation Complete ===")
-print(f"Labels generated: {len(triple_barrier_df)} samples")
-print(f"Results saved to: {triple_barrier_output_path}")
+logging.info(f"\n=== Triple Barrier Implementation Complete ===")
+logging.info(f"Labels generated: {len(triple_barrier_df)} samples")
+logging.info(f"Results saved to: {triple_barrier_output_path}")
 # print(f"Visualizations saved to: {VISUALIZATION_PARAMS['output_dir']}")
 # print(f"Total visualization files: {len(visualization_files)}")
 
@@ -144,7 +151,7 @@ print(f"Results saved to: {triple_barrier_output_path}")
 # merged_label_df = triple_barrier_df.copy() + filtered_df.copy(), gunakan triple_barrier_df sebagai
 # data utama yang sudah ber-label, lalu tarik data filtered_df sesuai dengan 'date' dari 'decision_date' triple_barrier_df
 
-print("\n=== Merging Triple Barrier Labels with Features ===")
+logging.info("\n=== Merging Triple Barrier Labels with Features ===")
 logging.info("Merging triple_barrier_df with filtered_df based on decision_date...")
 
 # Konversi decision_date ke datetime jika belum
@@ -163,36 +170,74 @@ merged_label_df = triple_barrier_df.merge(
 if 'date' in merged_label_df.columns:
     merged_label_df = merged_label_df.drop('date', axis=1)
 
-print(f"Triple Barrier data shape: {triple_barrier_df.shape}")
-print(f"Filtered data shape: {filtered_df.shape}")
-print(f"Merged data shape: {merged_label_df.shape}")
-print(f"Successfully merged: {len(merged_label_df[merged_label_df.notna().all(axis=1)])} complete rows")
+logging.info(f"Triple Barrier data shape: {triple_barrier_df.shape}")
+logging.info(f"Filtered data shape: {filtered_df.shape}")
+logging.info(f"Merged data shape: {merged_label_df.shape}")
+logging.info(f"Successfully merged: {len(merged_label_df[merged_label_df.notna().all(axis=1)])} complete rows")
 
 # Simpan hasil merge
 merged_output_path = '/root/vynixmodelling/ML_RL/merged_labeled_data.csv'
 merged_label_df.to_csv(merged_output_path, index=False)
 logging.info(f"Merged labeled data saved to: {merged_output_path}")
-print(f"Merged labeled data saved to: {merged_output_path}")
+logging.info(f"Merged labeled data saved to: {merged_output_path}")
 
-print(f"\n=== Final Summary ===")
-print(f"Original processed data shape: {filtered_df.shape}")
-print(f"Triple Barrier labels: {len(triple_barrier_df)} samples")
-print(f"Merged labeled data shape: {merged_label_df.shape}")
-print(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
-print(f"Date range: {triple_barrier_df['decision_date'].min()} to {triple_barrier_df['decision_date'].max()}")
-print(f"Technical + Fundamental features: {len(filtered_df.columns)} columns")
-print(f"Total features in merged data: {len(merged_label_df.columns)} columns")
-print(f"Triple Barrier parameters used: {TRIPLE_BARRIER_PARAMS}")
-print("\nAll preprocessing, labeling, and merging completed successfully!")
+logging.info(f"\n=== Final Summary ===")
+logging.info(f"Original processed data shape: {filtered_df.shape}")
+logging.info(f"Triple Barrier labels: {len(triple_barrier_df)} samples")
+logging.info(f"Merged labeled data shape: {merged_label_df.shape}")
+logging.info(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
+logging.info(f"Date range: {triple_barrier_df['decision_date'].min()} to {triple_barrier_df['decision_date'].max()}")
+logging.info(f"Technical + Fundamental features: {len(filtered_df.columns)} columns")
+logging.info(f"Total features in merged data: {len(merged_label_df.columns)} columns")
+logging.info(f"Triple Barrier parameters used: {TRIPLE_BARRIER_PARAMS}")
+logging.info("\nAll preprocessing, labeling, and merging completed successfully!")
 
-# 6. Train Test Split
+# 6. Training Data Preparation.
+# 6.1 Drop Column
+# Dataframe yang digunakan sebagai data training: merged_label_df. kolom yang perlu di drop:
+# 'decision_date', 'entry_date', 'end_date', 'end_price', 
+# 'return', 'barrier_touched', 'value_at_barrier_touched', 
+# 'time_converted', 'datetime','time', 'time_barrier'
+# Target Col: 'label'
 
+# Drop unnecessary columns for training
+columns_to_drop = [
+    'decision_date', 'entry_date', 'end_date', 'end_price',
+    'return', 'barrier_touched', 'value_at_barrier_touched',
+    'time_converted', 'datetime', 'time', 'time_barrier'
+]
 
+# Filter out columns that do not exist in the DataFrame
+existing_columns_to_drop = [col for col in columns_to_drop if col in merged_label_df.columns]
 
+if existing_columns_to_drop:
+    training_df = merged_label_df.drop(columns=existing_columns_to_drop)
+    logging.info(f"Dropped columns: {existing_columns_to_drop}")
+else:
+    training_df = merged_label_df.copy()
+    logging.info("No specified columns to drop were found in the DataFrame.")
 
+logging.info(f"Training DataFrame shape after dropping columns: {training_df.shape}")
+logging.info(f"Training DataFrame shape after dropping columns: {training_df.shape}")
+logging.info(f"Training DataFrame columns: {training_df.columns.tolist()}")
 
+# 6.2 Time-based Train Val Test Split
+logging.info("\n=== Splitting Data into Train, Validation, and Test Sets (Time-based) ===")
+logging.info("Splitting data into train, validation, and test sets using time-based approach...")
 
+# First, we need to preserve decision_date for time-based splitting
+# Create a copy of merged_label_df with decision_date preserved
+merged_with_date = merged_label_df.copy()
+merged_with_date['decision_date'] = pd.to_datetime(merged_with_date['decision_date'])
 
+# Define Q3 2024 start date (July 1, 2024)
+q3_2024_start = pd.Timestamp('2024-07-01')
 
+# Split data based on time
+test_mask = merged_with_date['decision_date'] >= q3_2024_start
+train_val_mask = ~test_mask
 
-
+# Create test set from Q3 2024 onwards
+test_data = merged_with_date[test_mask].copy()
+logging.info(f"Test data period: {test_data['decision_date'].min()} to {test_data['decision_date'].max()}")
+logging.info(f"Test data shape: {test_data.shape}")

@@ -97,7 +97,8 @@ class TechnicalFundamentalPreprocessor:
                                   start_date: str = '2012-04-01', 
                                   end_date: str = '2025-06-30') -> pd.DataFrame:
         """
-        Mengkonversi data fundamental quarterly menjadi format harian.
+        Mengkonversi data fundamental quarterly menjadi format harian dengan
+        memetakan data quarter ke quarter berikutnya (Q2 data digunakan untuk Q3 periode).
         
         Args:
             fundamental_df (pd.DataFrame): DataFrame dengan data fundamental quarterly
@@ -111,12 +112,12 @@ class TechnicalFundamentalPreprocessor:
             ValueError: Jika format data tidak sesuai
         """
         try:
-            logger.info("Converting quarterly data to daily format")
+            logger.info("Converting quarterly data to daily format with quarter shift mapping")
             
             # Create date range
             date_range = pd.date_range(start=start_date, end=end_date, freq='D')
             
-            # Create mapping from quarter to date ranges
+            # Create mapping from quarter to next quarter date ranges
             quarter_mapping = {}
             for quarter in fundamental_df.index:
                 try:
@@ -124,51 +125,69 @@ class TechnicalFundamentalPreprocessor:
                     year = int(year)
                     q = int(q)
                     
-                    # Define quarter start and end dates
-                    if q == 1:
-                        q_start = pd.Timestamp(year, 1, 1)
-                        q_end = pd.Timestamp(year, 3, 31)
-                    elif q == 2:
-                        q_start = pd.Timestamp(year, 4, 1)
-                        q_end = pd.Timestamp(year, 6, 30)
-                    elif q == 3:
-                        q_start = pd.Timestamp(year, 7, 1)
-                        q_end = pd.Timestamp(year, 9, 30)
-                    else:  # q == 4
-                        q_start = pd.Timestamp(year, 10, 1)
-                        q_end = pd.Timestamp(year, 12, 31)
+                    # Map current quarter data to next quarter period
+                    # Q2 2012 data -> Q3 2012 period
+                    if q == 4:
+                        next_year = year + 1
+                        next_q = 1
+                    else:
+                        next_year = year
+                        next_q = q + 1
                     
-                    quarter_mapping[quarter] = (q_start, q_end)
+                    # Define the period where this quarter's data will be used (next quarter)
+                    if next_q == 1:
+                        period_start = pd.Timestamp(next_year, 1, 1)
+                        period_end = pd.Timestamp(next_year, 3, 31)
+                    elif next_q == 2:
+                        period_start = pd.Timestamp(next_year, 4, 1)
+                        period_end = pd.Timestamp(next_year, 6, 30)
+                    elif next_q == 3:
+                        period_start = pd.Timestamp(next_year, 7, 1)
+                        period_end = pd.Timestamp(next_year, 9, 30)
+                    else:  # next_q == 4
+                        period_start = pd.Timestamp(next_year, 10, 1)
+                        period_end = pd.Timestamp(next_year, 12, 31)
+                    
+                    # Store the mapping: current quarter data -> next quarter period
+                    quarter_mapping[quarter] = (period_start, period_end)
+                    
+                    logger.debug(f"Quarter {quarter} data will be used in period {period_start.date()} to {period_end.date()}")
                     
                 except (ValueError, IndexError) as e:
                     logger.warning(f"Skipping invalid quarter format: {quarter}")
                     continue
             
-            # Create daily DataFrame with optimized approach
+            # Create daily DataFrame
             daily_data_dict = {}
             
-            # Fill daily data with quarterly values using optimized approach
+            # Fill daily data with quarterly values using quarter shift mapping
             for col in fundamental_df.columns:
                 daily_values = pd.Series(index=date_range, dtype=float)
                 
-                for quarter, (q_start, q_end) in quarter_mapping.items():
+                for quarter, (period_start, period_end) in quarter_mapping.items():
                     if quarter in fundamental_df.index:
-                        # Get dates within this quarter that are in our date range
-                        quarter_dates = date_range[(date_range >= q_start) & (date_range <= q_end)]
+                        # Get dates within the usage period that are in our date range
+                        usage_dates = date_range[(date_range >= period_start) & (date_range <= period_end)]
                         
-                        # Fill with quarterly value
-                        if len(quarter_dates) > 0:
-                            daily_values.loc[quarter_dates] = fundamental_df.loc[quarter, col]
+                        # Fill with quarterly value during the usage period
+                        if len(usage_dates) > 0:
+                            daily_values.loc[usage_dates] = fundamental_df.loc[quarter, col]
                 
                 daily_data_dict[col] = daily_values
             
-            # Create DataFrame from dictionary (more efficient)
+            # Create DataFrame from dictionary
             daily_data = pd.DataFrame(daily_data_dict)
             
-            # Forward fill missing values (carry forward quarterly data)
+            # Forward fill missing values to ensure continuity
             daily_data = daily_data.ffill()
             
+            # Log statistics
+            non_null_count = daily_data.notna().sum().sum()
+            total_count = len(daily_data) * len(daily_data.columns)
+            availability_pct = (non_null_count / total_count) * 100 if total_count > 0 else 0
+            
             logger.info(f"Daily conversion completed: {len(daily_data)} days, {len(daily_data.columns)} features")
+            logger.info(f"Data availability with quarter shift mapping: {availability_pct:.2f}%")
             
             return daily_data
             
@@ -316,7 +335,7 @@ class TechnicalFundamentalPreprocessor:
                                 technical_df: pd.DataFrame,
                                 fundamental_df: pd.DataFrame,
                                 output_path: str = None,
-                                start_period: str = '2012-Q2',
+                                start_period: str = '2012-Q3',
                                 end_period: str = '2025-Q2') -> pd.DataFrame:
         """
         Menjalankan pipeline lengkap preprocessing data.
@@ -325,20 +344,21 @@ class TechnicalFundamentalPreprocessor:
             technical_df (pd.DataFrame): DataFrame data teknikal
             fundamental_df (pd.DataFrame): DataFrame data fundamental
             output_path (str, optional): Path output file (opsional)
-            start_period (str): Periode mulai
+            start_period (str): Periode mulai (default: '2012-Q3' karena data fundamental 
+                              Q2 2012 digunakan untuk periode Q3 2012)
             end_period (str): Periode akhir
             
         Returns:
             pd.DataFrame: DataFrame hasil preprocessing
         """
         try:
-            logger.info("Starting complete preprocessing pipeline")
+            logger.info("Starting complete preprocessing pipeline with quarter shift mapping")
             
             # Step 1: Prepare data
             technical_prepared = self.prepare_technical_data(technical_df)
             fundamental_prepared = self.prepare_fundamental_data(fundamental_df)
             
-            # Step 2: Convert quarterly to daily
+            # Step 2: Convert quarterly to daily with quarter shift
             start_date = '2012-04-01' if start_period == '2012-Q2' else '2012-01-01'
             end_date = '2025-06-30' if end_period == '2025-Q2' else '2025-12-31'
             
@@ -369,16 +389,17 @@ class TechnicalFundamentalPreprocessor:
 def preprocess_technical_fundamental_data(technical_df: pd.DataFrame,
                                         fundamental_df: pd.DataFrame,
                                         output_path: str = None,
-                                        start_period: str = '2012-Q2',
+                                        start_period: str = '2012-Q3',
                                         end_period: str = '2025-Q2') -> pd.DataFrame:
     """
-    Fungsi utama untuk preprocessing data teknikal dan fundamental.
+    Fungsi utama untuk preprocessing data teknikal dan fundamental dengan
+    quarter shift mapping (Q2 data digunakan untuk Q3 periode).
     
     Args:
         technical_df (pd.DataFrame): DataFrame data teknikal
         fundamental_df (pd.DataFrame): DataFrame data fundamental
         output_path (str, optional): Path output file (opsional)
-        start_period (str): Periode mulai dalam format 'YYYY-QX'
+        start_period (str): Periode mulai dalam format 'YYYY-QX' (default: '2012-Q3')
         end_period (str): Periode akhir dalam format 'YYYY-QX'
         
     Returns:
@@ -394,7 +415,8 @@ def convert_quarterly_to_daily(fundamental_df: pd.DataFrame,
                              start_date: str = '2012-04-01',
                              end_date: str = '2025-06-30') -> pd.DataFrame:
     """
-    Fungsi untuk konversi data quarterly ke harian.
+    Fungsi untuk konversi data quarterly ke harian dengan quarter shift mapping
+    (Q2 data digunakan untuk Q3 periode).
     
     Args:
         fundamental_df (pd.DataFrame): DataFrame dengan data fundamental quarterly

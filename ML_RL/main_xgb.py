@@ -10,6 +10,8 @@ from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
 import joblib
 import time
+import optuna
+from triple_barrier.triplebarrier import apply_triple_barrier_labeling
 
 logging.basicConfig(level=logging.INFO)
 warnings.filterwarnings('ignore')
@@ -20,7 +22,42 @@ original_df = pd.read_csv('/root/vynixmodelling/dataset/TSLA_original.csv')
 # Logging Init
 # logging location: /root/vynixmodelling/ML_RL/logs
 # log name format: {log_name}_{time}.log
-logging.basicConfig(filename='/root/vynixmodelling/ML_RL/logs/main.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from datetime import datetime
+import os
+
+# Create logs/main directory if it doesn't exist
+os.makedirs('/root/vynixmodelling/ML_RL/logs/main', exist_ok=True)
+
+# Generate datetime-based log filename
+current_datetime = datetime.now().strftime('%Y%m%d_%H%M%S')
+log_filename = f'/root/vynixmodelling/ML_RL/logs/main/main_{current_datetime}.log'
+
+# Configure logging to both file and console
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Clear existing handlers
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# File handler for logging to file
+file_handler = logging.FileHandler(log_filename)
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+# Console handler for logging to terminal
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Add handlers to logger
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+# Configure for real-time logging
+file_handler.stream = open(file_handler.baseFilename, 'a', buffering=1)  # Line buffering
 
 # Preprocessing
 df = original_df.copy()
@@ -34,12 +71,12 @@ logging.info(f"Total rows in df without NaN or null values: {len(non_null_df)}")
 
 # Convert 'time' column to datetime format and print the first few rows
 non_null_df['time_converted'] = pd.to_datetime(non_null_df['time'], unit='s').dt.strftime('%d%m%Y')
-# print(non_null_df[['time', 'time_converted']].head(1))
-print(non_null_df.head)
-print(non_null_df.tail)
-print(non_null_df.info())
-print(non_null_df.describe())
-print(non_null_df.columns)
+# logging.info(non_null_df[['time', 'time_converted']].head(1))
+# logging.info(non_null_df.head)
+# logging.info(non_null_df.tail)
+# logging.info(non_null_df.info())
+# logging.info(non_null_df.describe())
+# logging.info(non_null_df.columns)
 
 # Data Gathering with Fundamental data
 # 1. Process Fundamental Data from Local Files
@@ -48,19 +85,19 @@ pivoted_df = process_fundamental_data_local("TSLA")
 
 # Jika gagal memuat dari lokal, fallback ke API
 if pivoted_df is None:
-    print("Fallback to API method...")
+    logging.info("Fallback to API method...")
     fundamental_data = get_fundamental_data("TSLA")
     pivoted_df = process_fundamental_data(fundamental_data, "TSLA")
-    print("Data loaded from API successfully")
+    logging.info("Data loaded from API successfully")
 else:
     # Baca kembali CSV yang sudah diproses untuk mendapatkan DataFrame
     pivoted_df = pd.read_csv('/root/vynixmodelling/dataset/data_fundamental/TSLA_time.csv', index_col=0)
-    print(f"Data loaded from local files successfully: {pivoted_df.shape}")
+    logging.info(f"Data loaded from local files successfully: {pivoted_df.shape}")
 
 # 3. Fundamental Data Financial Feature Engineering
 from fundamental_feature_engineering import apply_feature_engineering
 enhanced_fundamental_df = apply_feature_engineering(pivoted_df, "TSLA")
-# print(enhanced_fundamental_df.head(1))
+# logging.info(enhanced_fundamental_df.head(1))
 
 # 4. Teknikal and Fundamental Data Preprocessing
 from technical_fundamental_preprocessing import preprocess_technical_fundamental_data
@@ -81,12 +118,12 @@ logging.info(f"Data processing completed: {filtered_df.shape}")
 logging.info(f"Processed data saved to: {output_path}")
 
 # Display final results
-print(f"\nFinal processed data shape: {filtered_df.shape}")
-print(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
-print(f"Technical columns: {len([col for col in filtered_df.columns if any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
-print(f"Fundamental columns: {len([col for col in filtered_df.columns if col not in ['time', 'date', 'datetime'] and not any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
-print("\nPreprocessing completed successfully!")
-print(f'Data completeness: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
+logging.info(f"\nFinal processed data shape: {filtered_df.shape}")
+logging.info(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
+logging.info(f"Technical columns: {len([col for col in filtered_df.columns if any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
+logging.info(f"Fundamental columns: {len([col for col in filtered_df.columns if col not in ['time', 'date', 'datetime'] and not any(tech in col.lower() for tech in ['open', 'high', 'low', 'close', 'volume'])])}")
+logging.info("\nPreprocessing completed successfully!")
+logging.info(f'Data completeness: {(filtered_df.count().sum() / (len(filtered_df) * len(filtered_df.columns)) * 100):.2f}%')
 
 # 5. Implementasi Labelling Triple Barrier Method ke filtered_df
 # Semua parameter di init di file ini. main.py.
@@ -98,7 +135,7 @@ TRIPLE_BARRIER_PARAMS = {
     'volatility_window': 20,           # Window untuk menghitung volatilitas
     'upper_barrier_multiplier': 1.0,   # Multiplier untuk upper barrier
     'lower_barrier_multiplier': 1.0,   # Multiplier untuk lower barrier
-    'time_barrier_days': 15,            # Maksimum periode untuk menunggu barrier touch
+    'time_barrier_days': 5,            # Maksimum periode untuk menunggu barrier touch
     'verbose': True                    # Tampilkan statistik hasil
 }
 
@@ -111,7 +148,7 @@ VISUALIZATION_PARAMS = {
     'verbose': True                    # Tampilkan log proses
 }
 
-print("\n=== Applying Triple Barrier Method ===")
+logging.info("\n=== Applying Triple Barrier Method ===")
 logging.info("Starting Triple Barrier Method labeling...")
 
 # Aplikasikan Triple Barrier Method
@@ -125,7 +162,7 @@ triple_barrier_output_path = '/root/vynixmodelling/ML_RL/triple_barrier_results.
 triple_barrier_df.to_csv(triple_barrier_output_path, index=False)
 
 # Generate visualisasi Triple Barrier
-print("\n=== Generating Triple Barrier Visualizations ===")
+logging.info("\n=== Generating Triple Barrier Visualizations ===")
 logging.info("Generating Triple Barrier visualizations...")
 
 visualization_files = generate_triple_barrier_visualizations(
@@ -138,18 +175,18 @@ logging.info(f"Visualizations generated: {len(visualization_files)} files")
 for file_type, file_path in visualization_files.items():
     logging.info(f"{file_type}: {file_path}")
 
-print(f"\n=== Triple Barrier Implementation Complete ===")
-print(f"Labels generated: {len(triple_barrier_df)} samples")
-print(f"Results saved to: {triple_barrier_output_path}")
-# print(f"Visualizations saved to: {VISUALIZATION_PARAMS['output_dir']}")
-# print(f"Total visualization files: {len(visualization_files)}")
+logging.info(f"\n=== Triple Barrier Implementation Complete ===")
+logging.info(f"Labels generated: {len(triple_barrier_df)} samples")
+logging.info(f"Results saved to: {triple_barrier_output_path}")
+# logging.info(f"Visualizations saved to: {VISUALIZATION_PARAMS['output_dir']}")
+# logging.info(f"Total visualization files: {len(visualization_files)}")
 
 # Summary statistik final
 # 6. Merge Triple Barrier labels dengan filtered_df berdasarkan date
 # merged_label_df = triple_barrier_df.copy() + filtered_df.copy(), gunakan triple_barrier_df sebagai
 # data utama yang sudah ber-label, lalu tarik data filtered_df sesuai dengan 'date' dari 'decision_date' triple_barrier_df
 
-print("\n=== Merging Triple Barrier Labels with Features ===")
+logging.info("\n=== Merging Triple Barrier Labels with Features ===")
 logging.info("Merging triple_barrier_df with filtered_df based on decision_date...")
 
 # Konversi decision_date ke datetime jika belum
@@ -168,27 +205,26 @@ merged_label_df = triple_barrier_df.merge(
 if 'date' in merged_label_df.columns:
     merged_label_df = merged_label_df.drop('date', axis=1)
 
-print(f"Triple Barrier data shape: {triple_barrier_df.shape}")
-print(f"Filtered data shape: {filtered_df.shape}")
-print(f"Merged data shape: {merged_label_df.shape}")
-print(f"Successfully merged: {len(merged_label_df[merged_label_df.notna().all(axis=1)])} complete rows")
+logging.info(f"Triple Barrier data shape: {triple_barrier_df.shape}")
+logging.info(f"Filtered data shape: {filtered_df.shape}")
+logging.info(f"Merged data shape: {merged_label_df.shape}")
+logging.info(f"Successfully merged: {len(merged_label_df[merged_label_df.notna().all(axis=1)])} complete rows")
 
 # Simpan hasil merge
 merged_output_path = '/root/vynixmodelling/ML_RL/merged_labeled_data.csv'
 merged_label_df.to_csv(merged_output_path, index=False)
 logging.info(f"Merged labeled data saved to: {merged_output_path}")
-print(f"Merged labeled data saved to: {merged_output_path}")
 
-print(f"\n=== Final Summary ===")
-print(f"Original processed data shape: {filtered_df.shape}")
-print(f"Triple Barrier labels: {len(triple_barrier_df)} samples")
-print(f"Merged labeled data shape: {merged_label_df.shape}")
-print(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
-print(f"Date range: {triple_barrier_df['decision_date'].min()} to {triple_barrier_df['decision_date'].max()}")
-print(f"Technical + Fundamental features: {len(filtered_df.columns)} columns")
-print(f"Total features in merged data: {len(merged_label_df.columns)} columns")
-print(f"Triple Barrier parameters used: {TRIPLE_BARRIER_PARAMS}")
-print("\nAll preprocessing, labeling, and merging completed successfully!")
+logging.info(f"\n=== Final Summary ===")
+logging.info(f"Original processed data shape: {filtered_df.shape}")
+logging.info(f"Triple Barrier labels: {len(triple_barrier_df)} samples")
+logging.info(f"Merged labeled data shape: {merged_label_df.shape}")
+logging.info(f"Date range: {filtered_df['date'].min()} to {filtered_df['date'].max()}")
+logging.info(f"Date range: {triple_barrier_df['decision_date'].min()} to {triple_barrier_df['decision_date'].max()}")
+logging.info(f"Technical + Fundamental features: {len(filtered_df.columns)} columns")
+logging.info(f"Total features in merged data: {len(merged_label_df.columns)} columns")
+logging.info(f"Triple Barrier parameters used: {TRIPLE_BARRIER_PARAMS}")
+logging.info("\nAll preprocessing, labeling, and merging completed successfully!")
 
 # 6. Training Data Preparation.
 # 6.1 Drop Column
@@ -216,22 +252,70 @@ else:
     logging.info("No specified columns to drop were found in the DataFrame.")
 
 logging.info(f"Training DataFrame shape after dropping columns: {training_df.shape}")
-print(f"Training DataFrame shape after dropping columns: {training_df.shape}")
-print(f"Training DataFrame columns: {training_df.columns.tolist()}")
+logging.info(f"Training DataFrame columns: {training_df.columns.tolist()}")
 
-# 6.2 Train Val Test Split. 70:20:10
-print("\n=== Splitting Data into Train, Validation, and Test Sets ===")
-logging.info("Splitting data into train, validation, and test sets...")
+# 6.2 Time-based Train Val Test Split
+logging.info("\n=== Splitting Data into Train, Validation, and Test Sets (Time-based) ===")
+logging.info("Splitting data into train, validation, and test sets using time-based approach...")
 
-X = training_df.drop('label', axis=1)
-y = training_df['label']
+# First, we need to preserve decision_date for time-based splitting
+# Create a copy of merged_label_df with decision_date preserved
+merged_with_date = merged_label_df.copy()
+merged_with_date['decision_date'] = pd.to_datetime(merged_with_date['decision_date'])
 
-# Split 70% for training, 30% for temp (test + validation)
-X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.30, random_state=42, stratify=y)
+# Define Q3 2024 start date (July 1, 2024)
+q3_2024_start = pd.Timestamp('2024-07-01')
 
-# Split X_temp and y_temp into test (20%) and validation (10%)
-# 20% of original is 2/3 of X_temp, and 10% of original is 1/3 of X_temp
-X_test, X_val, y_test, y_val = train_test_split(X_temp, y_temp, test_size=0.333333, random_state=42, stratify=y_temp)
+# Split data based on time
+test_mask = merged_with_date['decision_date'] >= q3_2024_start
+train_val_mask = ~test_mask
+
+# Create test set from Q3 2024 onwards
+test_data = merged_with_date[test_mask].copy()
+logging.info(f"Test data period: {test_data['decision_date'].min()} to {test_data['decision_date'].max()}")
+logging.info(f"Test data shape: {test_data.shape}")
+
+# Create train+validation set from data before Q3 2024
+train_val_data = merged_with_date[train_val_mask].copy()
+logging.info(f"Train+Val data period: {train_val_data['decision_date'].min()} to {train_val_data['decision_date'].max()}")
+logging.info(f"Train+Val data shape: {train_val_data.shape}")
+
+# Now drop the datetime columns for training
+columns_to_drop_final = [
+    'decision_date', 'entry_date', 'end_date', 'end_price',
+    'return', 'barrier_touched', 'value_at_barrier_touched',
+    'time_converted', 'datetime', 'time', 'time_barrier'
+]
+
+# Apply column dropping to test set
+existing_cols_test = [col for col in columns_to_drop_final if col in test_data.columns]
+if existing_cols_test:
+    test_data_clean = test_data.drop(columns=existing_cols_test)
+else:
+    test_data_clean = test_data.copy()
+
+# Apply column dropping to train+val set
+existing_cols_train_val = [col for col in columns_to_drop_final if col in train_val_data.columns]
+if existing_cols_train_val:
+    train_val_data_clean = train_val_data.drop(columns=existing_cols_train_val)
+else:
+    train_val_data_clean = train_val_data.copy()
+
+# Extract features and labels for test set
+X_test = test_data_clean.drop('label', axis=1)
+y_test = test_data_clean['label']
+
+# Extract features and labels for train+val set
+X_train_val = train_val_data_clean.drop('label', axis=1)
+y_train_val = train_val_data_clean['label']
+
+# Split train+val into train (80%) and validation (20%)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_train_val, y_train_val, test_size=0.20, random_state=42, stratify=y_train_val
+)
+
+# Update training_df to match the time-based split approach
+training_df = train_val_data_clean.copy()
 
 logging.info(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
 logging.info(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
@@ -250,21 +334,20 @@ X_val.to_csv(os.path.join(output_dir, 'X_val.csv'), index=False)
 y_val.to_csv(os.path.join(output_dir, 'y_val.csv'), index=False)
 
 logging.info(f"Train, test, and validation data saved to {output_dir}")
-print(f"Train, test, and validation data saved to {output_dir}")
 
 # 7. Training
 # 7.1 XGBoost. Hanya gunakan data Train dan Val dulu.
-print("\n=== Training XGBoost Model ===")
+logging.info("\n=== Training XGBoost Model ===")
 logging.info("Initializing and training XGBoost Classifier...")
 
 # Check unique labels
-print(f"Unique labels in training data: {sorted(y_train.unique())}")
-print(f"Label distribution in training data: {y_train.value_counts().sort_index()}")
+logging.info(f"Unique labels in training data: {sorted(y_train.unique())}")
+logging.info(f"Label distribution in training data: {y_train.value_counts().sort_index()}")
 logging.info(f"Unique labels: {sorted(y_train.unique())}")
 
 # Check unique labels in training data
 unique_labels = sorted(y_train.unique())
-print(f"Unique labels found in training data: {unique_labels}")
+logging.info(f"Unique labels found in training data: {unique_labels}")
 
 # Create dynamic mapping based on actual labels present
 if len(unique_labels) == 2:
@@ -282,15 +365,15 @@ else:
     objective = 'multi:softmax'
     eval_metric = 'mlogloss'
 
-print(f"Label mapping: {label_mapping}")
-print(f"Number of classes: {num_classes}")
+logging.info(f"Label mapping: {label_mapping}")
+logging.info(f"Number of classes: {num_classes}")
 
 # Apply mapping to training and validation labels
 y_train_mapped = y_train.map(label_mapping)
 y_val_mapped = y_val.map(label_mapping)
 
-print(f"Mapped labels in training data: {sorted(y_train_mapped.unique())}")
-print(f"Mapped label distribution: {y_train_mapped.value_counts().sort_index()}")
+logging.info(f"Mapped labels in training data: {sorted(y_train_mapped.unique())}")
+logging.info(f"Mapped label distribution: {y_train_mapped.value_counts().sort_index()}")
 
 # Initialize XGBoost Classifier with dynamic configuration
 xgb_model = XGBClassifier(
@@ -307,16 +390,14 @@ xgb_model = XGBClassifier(
 )
 
 # Train the model
-print("Training XGBoost model...")
+logging.info("Training XGBoost model...")
 xgb_model.fit(X_train, y_train_mapped,
               eval_set=[(X_train, y_train_mapped), (X_val, y_val_mapped)],
               verbose=True)
 
 logging.info("XGBoost Model training completed.")
-print("XGBoost Model training completed.")
 
 # Evaluate on Validation Set
-print("\n=== Evaluating XGBoost Model on Validation Set ===")
 logging.info("Evaluating XGBoost Model on validation set...")
 
 # Make predictions using mapped labels
@@ -326,9 +407,9 @@ y_proba_val = xgb_model.predict_proba(X_val)
 # Convert predictions back to original labels
 y_pred_val = pd.Series(y_pred_val_mapped).map(reverse_label_mapping)
 
-print(f"Predicted labels (mapped): {sorted(y_pred_val_mapped)}")
-print(f"Predicted labels (original): {sorted(y_pred_val.unique())}")
-print(f"Validation labels (original): {sorted(y_val.unique())}")
+logging.info(f"Predicted labels (mapped): {sorted(y_pred_val_mapped)}")
+logging.info(f"Predicted labels (original): {sorted(y_pred_val.unique())}")
+logging.info(f"Validation labels (original): {sorted(y_val.unique())}")
 
 # Calculate metrics using original labels
 accuracy_val = accuracy_score(y_val, y_pred_val)
@@ -353,23 +434,23 @@ logging.info(f"Validation Recall: {recall_val:.4f}")
 logging.info(f"Validation F1-Score: {f1_val:.4f}")
 logging.info(f"Validation ROC AUC: {roc_auc_val:.4f}")
 
-print(f"Validation Accuracy: {accuracy_val:.4f}")
-print(f"Validation Precision: {precision_val:.4f}")
-print(f"Validation Recall: {recall_val:.4f}")
-print(f"Validation F1-Score: {f1_val:.4f}")
-print(f"Validation ROC AUC: {roc_auc_val:.4f}")
+logging.info(f"Validation Accuracy: {accuracy_val:.4f}")
+logging.info(f"Validation Precision: {precision_val:.4f}")
+logging.info(f"Validation Recall: {recall_val:.4f}")
+logging.info(f"Validation F1-Score: {f1_val:.4f}")
+logging.info(f"Validation ROC AUC: {roc_auc_val:.4f}")
 
 # Display confusion matrix
 from sklearn.metrics import confusion_matrix, classification_report
-print("\n=== Confusion Matrix ===")
+logging.info("\n=== Confusion Matrix ===")
 cm = confusion_matrix(y_val, y_pred_val)
-print(f"Confusion Matrix:\n{cm}")
-print(f"\nClassification Report:\n{classification_report(y_val, y_pred_val)}")
+logging.info(f"Confusion Matrix:\n{cm}")
+logging.info(f"\nClassification Report:\n{classification_report(y_val, y_pred_val)}")
 
-print("XGBoost Model evaluation on validation set completed.")
+logging.info("XGBoost Model evaluation on validation set completed.")
 
 # 7.2 Evaluate on Training Set for comparison
-print("\n=== Evaluating XGBoost Model on Training Set ===")
+logging.info("\n=== Evaluating XGBoost Model on Training Set ===")
 logging.info("Evaluating XGBoost Model on training set...")
 
 # Make predictions on training set
@@ -382,18 +463,13 @@ precision_train = precision_score(y_train, y_pred_train, average='weighted')
 recall_train = recall_score(y_train, y_pred_train, average='weighted')
 f1_train = f1_score(y_train, y_pred_train, average='weighted')
 
-print(f"Training Accuracy: {accuracy_train:.4f}")
-print(f"Training Precision: {precision_train:.4f}")
-print(f"Training Recall: {recall_train:.4f}")
-print(f"Training F1-Score: {f1_train:.4f}")
-
 logging.info(f"Training Accuracy: {accuracy_train:.4f}")
 logging.info(f"Training Precision: {precision_train:.4f}")
 logging.info(f"Training Recall: {recall_train:.4f}")
 logging.info(f"Training F1-Score: {f1_train:.4f}")
 
 # 7.3 Save the trained model
-print("\n=== Saving XGBoost Model ===")
+logging.info("\n=== Saving XGBoost Model ===")
 logging.info("Saving trained XGBoost model...")
 
 import joblib
@@ -416,11 +492,8 @@ joblib.dump({
 
 logging.info(f"Model saved to: {model_path}")
 logging.info(f"Label mappings saved to: {mapping_path}")
-print(f"Model saved to: {model_path}")
-print(f"Label mappings saved to: {mapping_path}")
 
 # 7.4 Feature Importance Analysis
-print("\n=== Feature Importance Analysis ===")
 logging.info("Analyzing feature importance...")
 
 # Get feature importance
@@ -435,20 +508,17 @@ feature_importance_df = pd.DataFrame({
 }).sort_values('importance', ascending=False)
 
 # Display top 20 most important features
-print("Top 20 Most Important Features:")
-print(feature_importance_df.head(20))
+logging.info("Top 20 Most Important Features:")
+logging.info(feature_importance_df.head(20))
 
 # Save feature importance
 feature_importance_path = os.path.join(model_dir, 'feature_importance.csv')
 feature_importance_df.to_csv(feature_importance_path, index=False)
 logging.info(f"Feature importance saved to: {feature_importance_path}")
-print(f"Feature importance saved to: {feature_importance_path}")
 
-print("\n=== XGBoost Training and Evaluation Complete ===")
 logging.info("XGBoost training and evaluation completed successfully.")
 
 # 7.5 Testing model menggunakan data test dengan inferensi menggunakan model yang sudah dibuat sebelumnya
-print("\n=== Testing XGBoost Model on Test Set ===")
 logging.info("Testing XGBoost Model on test set...")
 
 # Make predictions on test set using the trained model
@@ -458,10 +528,10 @@ y_proba_test = xgb_model.predict_proba(X_test)
 # Convert predictions back to original labels
 y_pred_test = pd.Series(y_pred_test_mapped).map(reverse_label_mapping)
 
-print(f"Test set size: {len(X_test)} samples")
-print(f"Predicted labels (mapped): {sorted(set(y_pred_test_mapped))}")
-print(f"Predicted labels (original): {sorted(y_pred_test.unique())}")
-print(f"Test labels (original): {sorted(y_test.unique())}")
+logging.info(f"Test set size: {len(X_test)} samples")
+logging.info(f"Predicted labels (mapped): {sorted(set(y_pred_test_mapped))}")
+logging.info(f"Predicted labels (original): {sorted(y_pred_test.unique())}")
+logging.info(f"Test labels (original): {sorted(y_test.unique())}")
 
 # Calculate test metrics using original labels
 accuracy_test = accuracy_score(y_test, y_pred_test)
@@ -480,13 +550,6 @@ else:
     roc_auc_test = roc_auc_score(y_test_mapped_for_roc, y_proba_test, multi_class='ovr', average='weighted')
 
 # Display test results
-print("\n=== Test Set Performance ===")
-print(f"Test Accuracy: {accuracy_test:.4f}")
-print(f"Test Precision: {precision_test:.4f}")
-print(f"Test Recall: {recall_test:.4f}")
-print(f"Test F1-Score: {f1_test:.4f}")
-print(f"Test ROC AUC: {roc_auc_test:.4f}")
-
 logging.info(f"Test Accuracy: {accuracy_test:.4f}")
 logging.info(f"Test Precision: {precision_test:.4f}")
 logging.info(f"Test Recall: {recall_test:.4f}")
@@ -494,13 +557,13 @@ logging.info(f"Test F1-Score: {f1_test:.4f}")
 logging.info(f"Test ROC AUC: {roc_auc_test:.4f}")
 
 # Display test confusion matrix
-print("\n=== Test Set Confusion Matrix ===")
+logging.info("\n=== Test Set Confusion Matrix ===")
 cm_test = confusion_matrix(y_test, y_pred_test)
-print(f"Test Confusion Matrix:\n{cm_test}")
-print(f"\nTest Classification Report:\n{classification_report(y_test, y_pred_test)}")
+logging.info(f"Test Confusion Matrix:\n{cm_test}")
+logging.info(f"\nTest Classification Report:\n{classification_report(y_test, y_pred_test)}")
 
 # Compare performance across all sets
-print("\n=== Performance Comparison Across All Sets ===")
+logging.info("\n=== Performance Comparison Across All Sets ===")
 performance_comparison = pd.DataFrame({
     'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'ROC AUC'],
     'Training': [accuracy_train, precision_train, recall_train, f1_train, 0.0],  # ROC AUC not calculated for training
@@ -508,13 +571,12 @@ performance_comparison = pd.DataFrame({
     'Test': [accuracy_test, precision_test, recall_test, f1_test, roc_auc_test]
 })
 
-print(performance_comparison.round(4))
+logging.info(performance_comparison.round(4))
 
 # Save performance comparison
 performance_path = os.path.join(model_dir, 'performance_comparison.csv')
 performance_comparison.to_csv(performance_path, index=False)
 logging.info(f"Performance comparison saved to: {performance_path}")
-print(f"Performance comparison saved to: {performance_path}")
 
 # Save test predictions for further analysis
 test_predictions_dict = {
@@ -543,106 +605,193 @@ test_predictions_df['correct_prediction'] = (test_predictions_df['actual_label']
 test_predictions_path = os.path.join(model_dir, 'test_predictions.csv')
 test_predictions_df.to_csv(test_predictions_path, index=False)
 logging.info(f"Test predictions saved to: {test_predictions_path}")
-print(f"Test predictions saved to: {test_predictions_path}")
 
 # Analyze prediction confidence
-print("\n=== Prediction Confidence Analysis ===")
-print(f"Average prediction confidence: {test_predictions_df['prediction_confidence'].mean():.4f}")
-print(f"Confidence for correct predictions: {test_predictions_df[test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
-print(f"Confidence for incorrect predictions: {test_predictions_df[~test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
+logging.info("\n=== Prediction Confidence Analysis ===")
+logging.info(f"Average prediction confidence: {test_predictions_df['prediction_confidence'].mean():.4f}")
+logging.info(f"Confidence for correct predictions: {test_predictions_df[test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
+logging.info(f"Confidence for incorrect predictions: {test_predictions_df[~test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
 
 # Show prediction distribution
-print("\n=== Test Set Prediction Distribution ===")
-print("Actual vs Predicted Label Distribution:")
-print(pd.crosstab(y_test, y_pred_test, margins=True))
+logging.info("\n=== Test Set Prediction Distribution ===")
+logging.info("Actual vs Predicted Label Distribution:")
+logging.info(pd.crosstab(y_test, y_pred_test, margins=True))
 
-print("\n=== XGBoost Model Testing Complete ===")
 logging.info("XGBoost model testing on test set completed successfully.")
 
 # 8. Hyperparameter Tuning. Hanya gunakan data Train dan Val terlebih dahulu saja.
-print("\n" + "="*80)
-print("8. HYPERPARAMETER TUNING")
-print("="*80)
+logging.info("\n" + "="*80)
+logging.info("8. HYPERPARAMETER TUNING")
+logging.info("="*80)
 
 # Import libraries for hyperparameter tuning
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import make_scorer
 import optuna
+from optuna.samplers import TPESampler
+from optuna.pruners import MedianPruner
 import time
+import os
+from datetime import datetime
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    logging.info("Warning: Plotly not available. Visualization will be skipped.")
 import warnings
 warnings.filterwarnings('ignore')
 
 # 8.1 Hyperparameter pada parameter-parameter Model XGboost saja.
-print("\n8.1 XGBoost Hyperparameter Tuning")
-print("-" * 50)
+logging.info("\n8.1 XGBoost Hyperparameter Tuning with Optuna")
+logging.info("-" * 50)
 
-# Define XGBoost parameter grid
-if num_classes == 2:
-    xgb_param_grid = {
-        'n_estimators': [100, 200, 300],
-        'max_depth': [3, 4, 5, 6],
-        'learning_rate': [0.01, 0.1, 0.2],
-        'subsample': [0.8, 0.9, 1.0],
-        'colsample_bytree': [0.8, 0.9, 1.0],
-        'reg_alpha': [0, 0.1, 1],
-        'reg_lambda': [1, 1.5, 2]
+# Define objective function for Optuna
+def xgb_objective(trial):
+    # Suggest hyperparameters with optimal distributions
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 100, 1000, step=50),
+        'max_depth': trial.suggest_int('max_depth', 3, 12),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+        'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
+        'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
+        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+        'gamma': trial.suggest_float('gamma', 0, 5, log=False),
+        'booster': trial.suggest_categorical('booster', ['gbtree', 'gblinear']),
+        'tree_method': trial.suggest_categorical('tree_method', ['auto', 'exact', 'approx', 'hist'])
     }
-    objective = 'binary:logistic'
-    eval_metric = 'logloss'
-else:
-    xgb_param_grid = {
-        'n_estimators': [100, 200, 300],
-        'max_depth': [3, 4, 5, 6],
-        'learning_rate': [0.01, 0.1, 0.2],
-        'subsample': [0.8, 0.9, 1.0],
-        'colsample_bytree': [0.8, 0.9, 1.0],
-        'reg_alpha': [0, 0.1, 1],
-        'reg_lambda': [1, 1.5, 2]
-    }
-    objective = 'multi:softmax'
-    eval_metric = 'mlogloss'
+    
+    # Set objective and eval_metric based on number of classes
+    if num_classes == 2:
+        params['objective'] = 'binary:logistic'
+        params['eval_metric'] = 'logloss'
+    else:
+        params['objective'] = 'multi:softmax'
+        params['num_class'] = num_classes
+        params['eval_metric'] = 'mlogloss'
+    
+    params['random_state'] = 42
+    params['n_jobs'] = -1
+    params['verbosity'] = 0  # Suppress XGBoost output
+    
+    # Create and train model
+    model = XGBClassifier(**params)
+    
+    # Use cross-validation for robust evaluation
+    from sklearn.model_selection import cross_val_score
+    cv_scores = cross_val_score(
+        model, X_train, y_train_mapped, 
+        cv=3, scoring='accuracy', n_jobs=-1
+    )
+    
+    # Return mean CV score
+    return cv_scores.mean()
 
-# Create base model for tuning
-base_xgb = XGBClassifier(
-    objective=objective,
-    num_class=num_classes if num_classes > 2 else None,
-    eval_metric=eval_metric,
-    random_state=42,
-    n_jobs=-1
-)
+# Enhanced progress callback class with early stopping and comprehensive logging
+class EnhancedProgressCallback:
+    def __init__(self, study_name="Hyperparameter Tuning", patience=10, min_improvement=0.001):
+        self.study_name = study_name
+        self.start_time = time.time()
+        self.patience = patience
+        self.min_improvement = min_improvement
+        self.best_score = float('-inf')
+        self.trials_without_improvement = 0
+        self.trial_scores = []
+        
+    def __call__(self, study, trial):
+        elapsed_time = time.time() - self.start_time
+        current_score = trial.value if trial.value is not None else 0.0
+        self.trial_scores.append(current_score)
+        
+        # Check for improvement
+        if current_score > self.best_score + self.min_improvement:
+            self.best_score = current_score
+            self.trials_without_improvement = 0
+        else:
+            self.trials_without_improvement += 1
+        
+        # Progress display
+        avg_score = sum(self.trial_scores[-5:]) / min(5, len(self.trial_scores))  # Last 5 trials average
+        logging.info(f"{self.study_name} - Trial {trial.number + 1}: Current = {current_score:.4f}, Best = {study.best_value:.4f}, Avg(5) = {avg_score:.4f}, Time = {elapsed_time:.1f}s")
+        
+        # Early stopping check
+        if self.trials_without_improvement >= self.patience:
+            logging.info(f"\n\nEarly stopping triggered after {self.patience} trials without improvement >= {self.min_improvement}")
+            study.stop()
+        
+        # Log significant improvements
+        if trial.number > 0 and current_score == study.best_value:
+            logging.info(f"\n*** New best score achieved: {current_score:.4f} ***")
+            logging.info(f"Parameters: {trial.params}")
 
-# Use RandomizedSearchCV for efficiency
-print("Starting XGBoost hyperparameter tuning...")
+# Create Optuna study with pruning
+logging.info("Starting XGBoost hyperparameter tuning with Optuna...")
 start_time = time.time()
 
-xgb_random_search = RandomizedSearchCV(
-    estimator=base_xgb,
-    param_distributions=xgb_param_grid,
-    n_iter=50,  # Number of parameter settings sampled
-    scoring='accuracy',
-    cv=3,  # 3-fold cross validation
-    random_state=42,
-    n_jobs=-1,
-    verbose=1
+# Create study with persistent storage
+storage = optuna.storages.RDBStorage(url="sqlite:///xgboost_study.db")
+study = optuna.create_study(
+    study_name="xgboost_hyperparameters",
+    direction="maximize",
+    storage=storage,
+    load_if_exists=True
 )
 
-# Fit the random search
-xgb_random_search.fit(X_train, y_train_mapped)
+# Add enhanced progress callback with early stopping
+xgb_callback = EnhancedProgressCallback(
+    study_name="XGBoost Hyperparameters", 
+    patience=20, 
+    min_improvement=0.002
+)
+
+# Optimize with enhanced callbacks
+study.optimize(
+    xgb_objective, 
+    n_trials=100,  # More trials for better optimization
+    callbacks=[xgb_callback],
+    show_progress_bar=True
+)
+
+# Create visualizations
+# visualize_study_results(study, "xgboost_hyperparameters")  # Function not defined, commented out
 
 xgb_tuning_time = time.time() - start_time
-print(f"XGBoost tuning completed in {xgb_tuning_time:.2f} seconds")
+logging.info(f"XGBoost tuning completed in {xgb_tuning_time:.2f} seconds")
 
 # Get best parameters and score
-best_xgb_params = xgb_random_search.best_params_
-best_xgb_score = xgb_random_search.best_score_
+best_xgb_params = study.best_params
+best_xgb_score = study.best_value
 
-print(f"\nBest XGBoost Parameters:")
+logging.info(f"\nBest XGBoost Parameters:")
 for param, value in best_xgb_params.items():
-    print(f"  {param}: {value}")
-print(f"Best Cross-Validation Score: {best_xgb_score:.4f}")
+    logging.info(f"  {param}: {value}")
+logging.info(f"Best Cross-Validation Score: {best_xgb_score:.4f}")
+logging.info(f"Number of trials: {len(study.trials)}")
+logging.info(f"Number of pruned trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
 
-# Train best XGBoost model
-best_xgb_model = xgb_random_search.best_estimator_
+# Train best XGBoost model with optimal parameters
+if num_classes == 2:
+    best_xgb_model = XGBClassifier(
+        objective='binary:logistic',
+        eval_metric='logloss',
+        random_state=42,
+        n_jobs=-1,
+        **best_xgb_params
+    )
+else:
+    best_xgb_model = XGBClassifier(
+        objective='multi:softmax',
+        num_class=num_classes,
+        eval_metric='mlogloss',
+        random_state=42,
+        n_jobs=-1,
+        **best_xgb_params
+    )
+
+best_xgb_model.fit(X_train, y_train_mapped)
 
 # Evaluate on validation set
 y_val_pred_tuned = best_xgb_model.predict(X_val)
@@ -659,216 +808,315 @@ if num_classes == 2:
 else:
     val_roc_auc_tuned = roc_auc_score(y_val_mapped, y_val_proba_tuned, multi_class='ovr')
 
-print(f"\nTuned XGBoost Validation Performance:")
-print(f"Accuracy: {val_accuracy_tuned:.4f}")
-print(f"Precision: {val_precision_tuned:.4f}")
-print(f"Recall: {val_recall_tuned:.4f}")
-print(f"F1-Score: {val_f1_tuned:.4f}")
-print(f"ROC AUC: {val_roc_auc_tuned:.4f}")
+logging.info(f"\nTuned XGBoost Validation Performance:")
+logging.info(f"Accuracy: {val_accuracy_tuned:.4f}")
+logging.info(f"Precision: {val_precision_tuned:.4f}")
+logging.info(f"Recall: {val_recall_tuned:.4f}")
+logging.info(f"F1-Score: {val_f1_tuned:.4f}")
+logging.info(f"ROC AUC: {val_roc_auc_tuned:.4f}")
 
 # Compare with original model (use validation accuracy from section 7.4)
-print(f"\nComparison with Original Model:")
+logging.info(f"\nComparison with Original Model:")
 original_val_accuracy = 0.6295  # From previous validation results
-print(f"Original Validation Accuracy: {original_val_accuracy:.4f}")
-print(f"Tuned Validation Accuracy: {val_accuracy_tuned:.4f}")
-print(f"Improvement: {val_accuracy_tuned - original_val_accuracy:.4f}")
+logging.info(f"Original Validation Accuracy: {original_val_accuracy:.4f}")
+logging.info(f"Tuned Validation Accuracy: {val_accuracy_tuned:.4f}")
+logging.info(f"Improvement: {val_accuracy_tuned - original_val_accuracy:.4f}")
 
 # Save tuned XGBoost model
 tuned_xgb_model_path = 'logs/xgb_models/tuned_xgb_model.pkl'
 joblib.dump(best_xgb_model, tuned_xgb_model_path)
-print(f"\nTuned XGBoost model saved to: {tuned_xgb_model_path}")
+logging.info(f"\nTuned XGBoost model saved to: {tuned_xgb_model_path}")
+
+# Save XGBoost tuning feature importance
+xgb_tuning_feature_importance = pd.DataFrame({
+    'feature': X_train.columns,
+    'importance': best_xgb_model.feature_importances_
+}).sort_values('importance', ascending=False)
+
+xgb_tuning_feature_importance_path = 'logs/xgb_models/feature_importance_xgb_tuning.csv'
+xgb_tuning_feature_importance.to_csv(xgb_tuning_feature_importance_path, index=False)
+logging.info(f"XGBoost tuning feature importance saved to: {xgb_tuning_feature_importance_path}")
+
+# Print XGBoost tuning feature importance
+logging.info("\n=== XGBoost Tuning Feature Importance ===")
+logging.info(xgb_tuning_feature_importance.head(20))
+logging.info(f"\nFull feature importance saved to: {xgb_tuning_feature_importance_path}")
 
 # 8.2 Melakukan tuning juga pada volatility_window, upper_barrier_multiplier, lower_barrier_multiplier, time_barrier_days.
-print("\n8.2 Triple Barrier Parameters Tuning")
-print("-" * 50)
+logging.info("\n8.2 Combined XGBoost and Barrier Parameters Tuning with Optuna")
+logging.info("-" * 50)
 
-# Define triple barrier parameter grid
-barrier_param_grid = {
-    'volatility_window': [10, 20, 30],
-    'upper_barrier_multiplier': [1.0, 1.5, 2.0],
-    'lower_barrier_multiplier': [1.0, 1.5, 2.0],
-    'time_barrier_days': [5, 10, 15]
-}
+# Define objective function for combined XGBoost and Barrier parameters
+def combined_objective(trial):
+    # XGBoost hyperparameters
+    xgb_params = {
+        'n_estimators': trial.suggest_int('n_estimators', 100, 1000, step=50),
+        'max_depth': trial.suggest_int('max_depth', 3, 12),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+        'subsample': trial.suggest_float('subsample', 0.6, 1.0, step=0.1),
+        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0, step=0.1),
+        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0, step=0.1),
+        'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, step=0.1),
+        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+        'gamma': trial.suggest_float('gamma', 0.0, 5.0, step=0.1)
+    }
+    
+    # Barrier parameters - For 1:1 risk-reward ratio, upper and lower multipliers must be equal
+    barrier_multiplier = trial.suggest_float('barrier_multiplier', 0.5, 4.0, step=0.1)
+    
+    barrier_params = {
+        'volatility_window': trial.suggest_int('volatility_window', 5, 60, step=5),
+        'upper_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
+        'lower_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
+        'time_barrier_days': trial.suggest_int('time_barrier_days', 3, 28),
+        'verbose': False
+    }
+    
+    try:
+        # Apply triple barrier labeling with current parameters
+        temp_triple_barrier_df = apply_triple_barrier_labeling(
+            data=filtered_df,
+            **barrier_params
+        )
+        
+        # Merge with filtered_df
+        temp_triple_barrier_df['decision_date'] = pd.to_datetime(temp_triple_barrier_df['decision_date'])
+        temp_merged_df = temp_triple_barrier_df.merge(
+            filtered_df, 
+            left_on='decision_date', 
+            right_on='date', 
+            how='left'
+        )
+        
+        if 'date' in temp_merged_df.columns:
+            temp_merged_df = temp_merged_df.drop('date', axis=1)
+        
+        # Drop unnecessary columns for training
+        temp_columns_to_drop = [
+            'decision_date', 'entry_date', 'end_date', 'end_price',
+            'return', 'barrier_touched', 'value_at_barrier_touched',
+            'time_converted', 'datetime', 'time', 'time_barrier'
+        ]
+        temp_existing_columns_to_drop = [col for col in temp_columns_to_drop if col in temp_merged_df.columns]
+        
+        if temp_existing_columns_to_drop:
+            df_with_labels_new = temp_merged_df.drop(columns=temp_existing_columns_to_drop)
+        else:
+            df_with_labels_new = temp_merged_df.copy()
+        
+        # Remove rows with NaN labels
+        df_with_labels_new = df_with_labels_new.dropna(subset=['label'])
+        
+        if len(df_with_labels_new) < 100:  # Skip if too few samples
+            return 0.0  # Return poor score for pruning
+        
+        # Prepare features and labels
+        feature_columns_new = [col for col in df_with_labels_new.columns if col != 'label']
+        X_new = df_with_labels_new[feature_columns_new]
+        y_new = df_with_labels_new['label']
+        
+        # Split data
+        X_train_new, X_temp_new, y_train_new, y_temp_new = train_test_split(
+            X_new, y_new, test_size=0.4, random_state=42, stratify=y_new
+        )
+        X_val_new, X_test_new, y_val_new, y_test_new = train_test_split(
+            X_temp_new, y_temp_new, test_size=0.5, random_state=42, stratify=y_temp_new
+        )
+        
+        # Map labels
+        unique_labels_new = sorted(y_train_new.unique())
+        num_classes_new = len(unique_labels_new)
+        
+        if num_classes_new == 2:
+            label_mapping_new = {unique_labels_new[0]: 0, unique_labels_new[1]: 1}
+        else:
+            label_mapping_new = {label: idx for idx, label in enumerate(unique_labels_new)}
+        
+        y_train_mapped_new = y_train_new.map(label_mapping_new)
+        y_val_mapped_new = y_val_new.map(label_mapping_new)
+        
+        # Train model with suggested XGBoost parameters
+        if num_classes_new == 2:
+            temp_model = XGBClassifier(
+                objective='binary:logistic',
+                eval_metric='logloss',
+                random_state=42,
+                **xgb_params
+            )
+        else:
+            temp_model = XGBClassifier(
+                objective='multi:softmax',
+                num_class=num_classes_new,
+                eval_metric='mlogloss',
+                random_state=42,
+                **xgb_params
+            )
+        
+        temp_model.fit(X_train_new, y_train_mapped_new)
+        
+        # Evaluate on validation set
+        y_val_pred_new = temp_model.predict(X_val_new)
+        val_accuracy_new = accuracy_score(y_val_mapped_new, y_val_pred_new)
+        
+        return val_accuracy_new
+        
+    except Exception as e:
+        # Return poor score for failed trials
+        return 0.0
 
-print("Starting Triple Barrier parameters tuning...")
+def create_study_with_storage(study_name, direction='maximize'):
+    """Create Optuna study with persistent storage"""
+    # Create studies directory if it doesn't exist
+    import os
+    os.makedirs('logs/optuna_studies', exist_ok=True)
+    
+    # Create database path
+    db_path = f'logs/optuna_studies/{study_name}.db'
+    storage = f'sqlite:///{db_path}'
+    
+    # Create or load study
+    study = optuna.create_study(
+        study_name=study_name,
+        storage=storage,
+        direction=direction,
+        load_if_exists=True
+    )
+    
+    logging.info(f"Study '{study_name}' created/loaded with storage: {db_path}")
+    return study
+
+# Create Optuna study for Triple Barrier parameters
+logging.info("Starting combined XGBoost and Barrier parameters optimization with Optuna...")
 start_time = time.time()
 
-# Store original parameters from TRIPLE_BARRIER_PARAMS
-original_volatility_window = TRIPLE_BARRIER_PARAMS['volatility_window']
-original_upper_barrier_multiplier = TRIPLE_BARRIER_PARAMS['upper_barrier_multiplier']
-original_lower_barrier_multiplier = TRIPLE_BARRIER_PARAMS['lower_barrier_multiplier']
-original_time_barrier_days = TRIPLE_BARRIER_PARAMS['time_barrier_days']
+# Create Optuna study for combined parameters
+combined_study = create_study_with_storage(
+    study_name="combined_xgb_barrier_parameters",
+    direction='maximize'
+)
 
-best_barrier_score = 0
-best_barrier_params = {}
-best_barrier_model = None
+# Create callback for early stopping and progress tracking
+combined_callback = EnhancedProgressCallback(study_name="Combined XGBoost and Barrier Parameters", patience=15, min_improvement=0.005)
 
-# Grid search for barrier parameters
-total_combinations = len(barrier_param_grid['volatility_window']) * len(barrier_param_grid['upper_barrier_multiplier']) * len(barrier_param_grid['lower_barrier_multiplier']) * len(barrier_param_grid['time_barrier_days'])
-current_combination = 0
+# Optimize combined parameters
+combined_study.optimize(
+    combined_objective, 
+    n_trials=100,  # Increased for better parameter space exploration
+    callbacks=[combined_callback],
+    show_progress_bar=True
+)
 
-for vol_window in barrier_param_grid['volatility_window']:
-    for upper_mult in barrier_param_grid['upper_barrier_multiplier']:
-        for lower_mult in barrier_param_grid['lower_barrier_multiplier']:
-            for time_days in barrier_param_grid['time_barrier_days']:
-                current_combination += 1
-                print(f"\nTesting combination {current_combination}/{total_combinations}:")
-                print(f"  volatility_window: {vol_window}")
-                print(f"  upper_barrier_multiplier: {upper_mult}")
-                print(f"  lower_barrier_multiplier: {lower_mult}")
-                print(f"  time_barrier_days: {time_days}")
-                
-                try:
-                    # Create temporary parameters dictionary
-                    temp_params = {
-                        'volatility_window': vol_window,
-                        'upper_barrier_multiplier': upper_mult,
-                        'lower_barrier_multiplier': lower_mult,
-                        'time_barrier_days': time_days,
-                        'verbose': False
-                    }
-                    
-                    # Apply triple barrier labeling with current parameters
-                    temp_triple_barrier_df = apply_triple_barrier_labeling(
-                        data=filtered_df,
-                        **temp_params
-                    )
-                    
-                    # Merge with filtered_df
-                    temp_triple_barrier_df['decision_date'] = pd.to_datetime(temp_triple_barrier_df['decision_date'])
-                    temp_merged_df = temp_triple_barrier_df.merge(
-                        filtered_df, 
-                        left_on='decision_date', 
-                        right_on='date', 
-                        how='left'
-                    )
-                    
-                    if 'date' in temp_merged_df.columns:
-                        temp_merged_df = temp_merged_df.drop('date', axis=1)
-                    
-                    # Drop unnecessary columns for training
-                    temp_columns_to_drop = [
-                        'decision_date', 'entry_date', 'end_date', 'end_price',
-                        'return', 'barrier_touched', 'value_at_barrier_touched',
-                        'time_converted', 'datetime', 'time', 'time_barrier'
-                    ]
-                    temp_existing_columns_to_drop = [col for col in temp_columns_to_drop if col in temp_merged_df.columns]
-                    
-                    if temp_existing_columns_to_drop:
-                        df_with_labels_new = temp_merged_df.drop(columns=temp_existing_columns_to_drop)
-                    else:
-                        df_with_labels_new = temp_merged_df.copy()
-                    
-                    # Remove rows with NaN labels
-                    df_with_labels_new = df_with_labels_new.dropna(subset=['label'])
-                    
-                    if len(df_with_labels_new) < 100:  # Skip if too few samples
-                        print(f"  Skipped: Too few samples ({len(df_with_labels_new)})")
-                        continue
-                    
-                    # Prepare features and labels
-                    feature_columns_new = [col for col in df_with_labels_new.columns if col != 'label']
-                    X_new = df_with_labels_new[feature_columns_new]
-                    y_new = df_with_labels_new['label']
-                    
-                    # Split data
-                    X_train_new, X_temp_new, y_train_new, y_temp_new = train_test_split(
-                        X_new, y_new, test_size=0.4, random_state=42, stratify=y_new
-                    )
-                    X_val_new, X_test_new, y_val_new, y_test_new = train_test_split(
-                        X_temp_new, y_temp_new, test_size=0.5, random_state=42, stratify=y_temp_new
-                    )
-                    
-                    # Map labels
-                    unique_labels_new = sorted(y_train_new.unique())
-                    num_classes_new = len(unique_labels_new)
-                    
-                    if num_classes_new == 2:
-                        label_mapping_new = {unique_labels_new[0]: 0, unique_labels_new[1]: 1}
-                    else:
-                        label_mapping_new = {label: idx for idx, label in enumerate(unique_labels_new)}
-                    
-                    y_train_mapped_new = y_train_new.map(label_mapping_new)
-                    y_val_mapped_new = y_val_new.map(label_mapping_new)
-                    
-                    # Train model with best XGBoost parameters
-                    if num_classes_new == 2:
-                        temp_model = XGBClassifier(
-                            objective='binary:logistic',
-                            eval_metric='logloss',
-                            random_state=42,
-                            **best_xgb_params
-                        )
-                    else:
-                        temp_model = XGBClassifier(
-                            objective='multi:softmax',
-                            num_class=num_classes_new,
-                            eval_metric='mlogloss',
-                            random_state=42,
-                            **best_xgb_params
-                        )
-                    
-                    temp_model.fit(X_train_new, y_train_mapped_new)
-                    
-                    # Evaluate on validation set
-                    y_val_pred_new = temp_model.predict(X_val_new)
-                    val_accuracy_new = accuracy_score(y_val_mapped_new, y_val_pred_new)
-                    
-                    print(f"  Validation Accuracy: {val_accuracy_new:.4f}")
-                    
-                    # Update best parameters if this is better
-                    if val_accuracy_new > best_barrier_score:
-                        best_barrier_score = val_accuracy_new
-                        best_barrier_params = {
-                            'volatility_window': vol_window,
-                            'upper_barrier_multiplier': upper_mult,
-                            'lower_barrier_multiplier': lower_mult,
-                            'time_barrier_days': time_days
-                        }
-                        best_barrier_model = temp_model
-                        print(f"  *** New best score: {val_accuracy_new:.4f} ***")
-                    
-                except Exception as e:
-                    print(f"  Error: {str(e)}")
-                    continue
+# Calculate tuning time
+combined_tuning_time = time.time() - start_time
+logging.info(f"\nCombined tuning completed in {combined_tuning_time:.2f} seconds")
 
-barrier_tuning_time = time.time() - start_time
-print(f"\nTriple Barrier tuning completed in {barrier_tuning_time:.2f} seconds")
+# Get best combined parameters
+best_combined_params = combined_study.best_params
+best_combined_score = combined_study.best_value
 
-print(f"\nBest Triple Barrier Parameters:")
+# Separate XGBoost and barrier parameters
+best_xgb_params_combined = {
+    'n_estimators': best_combined_params['n_estimators'],
+    'max_depth': best_combined_params['max_depth'],
+    'learning_rate': best_combined_params['learning_rate'],
+    'subsample': best_combined_params['subsample'],
+    'colsample_bytree': best_combined_params['colsample_bytree'],
+    'reg_alpha': best_combined_params['reg_alpha'],
+    'reg_lambda': best_combined_params['reg_lambda'],
+    'min_child_weight': best_combined_params['min_child_weight'],
+    'gamma': best_combined_params['gamma']
+}
+
+best_barrier_params = {
+    'volatility_window': best_combined_params['volatility_window'],
+    'upper_barrier_multiplier': best_combined_params['barrier_multiplier'],
+    'lower_barrier_multiplier': best_combined_params['barrier_multiplier'],
+    'time_barrier_days': best_combined_params['time_barrier_days']
+}
+
+logging.info(f"\nBest Combined XGBoost Parameters:")
+for param, value in best_xgb_params_combined.items():
+    logging.info(f"  {param}: {value}")
+
+logging.info(f"\nBest Combined Barrier Parameters:")
 for param, value in best_barrier_params.items():
-    print(f"  {param}: {value}")
-print(f"Best Validation Score: {best_barrier_score:.4f}")
+    logging.info(f"  {param}: {value}")
+logging.info(f"Best Combined Validation Score: {best_combined_score:.4f}")
 
-# Compare with original barrier parameters
-print(f"\nComparison with Original Barrier Parameters:")
-print(f"Original Validation Accuracy: {val_accuracy_tuned:.4f}")
-print(f"Best Barrier Validation Accuracy: {best_barrier_score:.4f}")
-print(f"Improvement: {best_barrier_score - val_accuracy_tuned:.4f}")
+# Compare with original model
+logging.info(f"\nComparison with Original Model:")
+logging.info(f"Original Validation Accuracy: 0.6295")
+logging.info(f"XGBoost Only Tuned Validation Accuracy: {best_xgb_score:.4f}")
+logging.info(f"Combined Tuned Validation Accuracy: {best_combined_score:.4f}")
+logging.info(f"Improvement over original: {best_combined_score - 0.6295:.4f}")
+logging.info(f"Improvement over XGBoost only: {best_combined_score - best_xgb_score:.4f}")
 
-# Save best barrier model
-best_barrier_model_path = 'logs/xgb_models/best_barrier_model.pkl'
-joblib.dump(best_barrier_model, best_barrier_model_path)
-print(f"\nBest barrier model saved to: {best_barrier_model_path}")
+# Create the best combined model using the best parameters
+# Since barrier parameters don't create a model object, we save the parameters instead
+best_combined_model = {
+    'xgb_params': best_xgb_params_combined,
+    'barrier_params': best_barrier_params
+}
+
+# Save best combined model
+best_combined_model_path = 'logs/xgb_models/best_combined_model.pkl'
+joblib.dump(best_combined_model, best_combined_model_path)
+logging.info(f"\nBest combined model parameters saved to: {best_combined_model_path}")
+
+# Create and train the final combined model to get feature importance
+if num_classes == 2:
+    combined_model_for_importance = XGBClassifier(
+        objective='binary:logistic',
+        eval_metric='logloss',
+        random_state=42,
+        **best_xgb_params_combined
+    )
+else:
+    combined_model_for_importance = XGBClassifier(
+        objective='multi:softmax',
+        num_class=num_classes,
+        eval_metric='mlogloss',
+        random_state=42,
+        **best_xgb_params_combined
+    )
+
+# Train the model to get feature importance
+combined_model_for_importance.fit(X_train, y_train_mapped)
+
+# Save barrier tuning feature importance
+barrier_tuning_feature_importance = pd.DataFrame({
+    'feature': X_train.columns,
+    'importance': combined_model_for_importance.feature_importances_
+}).sort_values('importance', ascending=False)
+
+barrier_tuning_feature_importance_path = 'logs/xgb_models/feature_importance_barrier_tuning.csv'
+barrier_tuning_feature_importance.to_csv(barrier_tuning_feature_importance_path, index=False)
+logging.info(f"Barrier tuning feature importance saved to: {barrier_tuning_feature_importance_path}")
+
+# Print barrier tuning feature importance
+logging.info("\n=== Barrier Tuning Feature Importance ===")
+logging.info(barrier_tuning_feature_importance.head(20))
+logging.info(f"\nFull feature importance saved to: {barrier_tuning_feature_importance_path}")
 
 # Save best parameters
-best_params_combined = {
-    'xgb_params': best_xgb_params,
+best_params_final = {
+    'xgb_params_only': best_xgb_params,
+    'xgb_params_combined': best_xgb_params_combined,
     'barrier_params': best_barrier_params,
-    'best_xgb_score': best_xgb_score,
-    'best_barrier_score': best_barrier_score
+    'best_xgb_only_score': best_xgb_score,
+    'best_combined_score': best_combined_score
 }
 
 best_params_path = 'logs/xgb_results/best_hyperparameters.pkl'
-joblib.dump(best_params_combined, best_params_path)
-print(f"Best hyperparameters saved to: {best_params_path}")
+joblib.dump(best_params_final, best_params_path)
+logging.info(f"Best hyperparameters saved to: {best_params_path}")
 
 # 8.3 Melakukan testing dataset test dengan model yang disimpan dari proses 8.1 dan 8.2
-print("\n8.3 Final Testing with Best Hyperparameters")
-print("-" * 50)
+logging.info("\n8.3 Final Testing with Best Hyperparameters")
+logging.info("-" * 50)
 
 # Recreate the dataset with best barrier parameters
-print("Recreating dataset with best barrier parameters...")
+logging.info("Recreating dataset with best barrier parameters...")
 final_params = {
     'volatility_window': best_barrier_params['volatility_window'],
     'upper_barrier_multiplier': best_barrier_params['upper_barrier_multiplier'],
@@ -911,9 +1159,9 @@ else:
 # Remove rows with NaN labels
 df_with_labels_final = df_with_labels_final.dropna(subset=['label'])
 
-print(f"Final dataset shape: {df_with_labels_final.shape}")
-print(f"Label distribution:")
-print(df_with_labels_final['label'].value_counts().sort_index())
+logging.info(f"Final dataset shape: {df_with_labels_final.shape}")
+logging.info(f"Label distribution:")
+logging.info(df_with_labels_final['label'].value_counts().sort_index())
 
 # Prepare features and labels
 feature_columns_final = [col for col in df_with_labels_final.columns if col != 'label']
@@ -928,10 +1176,10 @@ X_val_final, X_test_final, y_val_final, y_test_final = train_test_split(
     X_temp_final, y_temp_final, test_size=0.5, random_state=42, stratify=y_temp_final
 )
 
-print(f"\nFinal data splits:")
-print(f"Training set: {X_train_final.shape[0]} samples")
-print(f"Validation set: {X_val_final.shape[0]} samples")
-print(f"Test set: {X_test_final.shape[0]} samples")
+logging.info(f"\nFinal data splits:")
+logging.info(f"Training set: {X_train_final.shape[0]} samples")
+logging.info(f"Validation set: {X_val_final.shape[0]} samples")
+logging.info(f"Test set: {X_test_final.shape[0]} samples")
 
 # Map labels
 unique_labels_final = sorted(y_train_final.unique())
@@ -946,17 +1194,17 @@ y_train_mapped_final = y_train_final.map(label_mapping_final)
 y_val_mapped_final = y_val_final.map(label_mapping_final)
 y_test_mapped_final = y_test_final.map(label_mapping_final)
 
-print(f"\nFinal label mapping: {label_mapping_final}")
-print(f"Number of classes: {num_classes_final}")
+logging.info(f"\nFinal label mapping: {label_mapping_final}")
+logging.info(f"Number of classes: {num_classes_final}")
 
-# Train final model with best hyperparameters
-print("\nTraining final model with best hyperparameters...")
+# Train final model with best combined hyperparameters
+logging.info("\nTraining final model with best combined hyperparameters...")
 if num_classes_final == 2:
     final_model = XGBClassifier(
         objective='binary:logistic',
         eval_metric='logloss',
         random_state=42,
-        **best_xgb_params
+        **best_xgb_params_combined
     )
 else:
     final_model = XGBClassifier(
@@ -964,14 +1212,14 @@ else:
         num_class=num_classes_final,
         eval_metric='mlogloss',
         random_state=42,
-        **best_xgb_params
+        **best_xgb_params_combined
     )
 
 # Train the final model
 final_model.fit(X_train_final, y_train_mapped_final)
 
 # Evaluate on all sets
-print("\nEvaluating final model on all datasets...")
+logging.info("\nEvaluating final model on all datasets...")
 
 # Training set evaluation
 y_train_pred_final = final_model.predict(X_train_final)
@@ -1016,46 +1264,46 @@ else:
     test_roc_auc_final = roc_auc_score(y_test_mapped_final, y_test_proba_final, multi_class='ovr')
 
 # Display final results
-print("\n" + "="*60)
-print("FINAL MODEL PERFORMANCE WITH BEST HYPERPARAMETERS")
-print("="*60)
+logging.info("\n" + "="*60)
+logging.info("FINAL MODEL PERFORMANCE WITH BEST HYPERPARAMETERS")
+logging.info("="*60)
 
-print(f"\nTraining Set Performance:")
-print(f"Accuracy: {train_accuracy_final:.4f}")
-print(f"Precision: {train_precision_final:.4f}")
-print(f"Recall: {train_recall_final:.4f}")
-print(f"F1-Score: {train_f1_final:.4f}")
-print(f"ROC AUC: {train_roc_auc_final:.4f}")
+logging.info(f"\nTraining Set Performance:")
+logging.info(f"Accuracy: {train_accuracy_final:.4f}")
+logging.info(f"Precision: {train_precision_final:.4f}")
+logging.info(f"Recall: {train_recall_final:.4f}")
+logging.info(f"F1-Score: {train_f1_final:.4f}")
+logging.info(f"ROC AUC: {train_roc_auc_final:.4f}")
 
-print(f"\nValidation Set Performance:")
-print(f"Accuracy: {val_accuracy_final:.4f}")
-print(f"Precision: {val_precision_final:.4f}")
-print(f"Recall: {val_recall_final:.4f}")
-print(f"F1-Score: {val_f1_final:.4f}")
-print(f"ROC AUC: {val_roc_auc_final:.4f}")
+logging.info(f"\nValidation Set Performance:")
+logging.info(f"Accuracy: {val_accuracy_final:.4f}")
+logging.info(f"Precision: {val_precision_final:.4f}")
+logging.info(f"Recall: {val_recall_final:.4f}")
+logging.info(f"F1-Score: {val_f1_final:.4f}")
+logging.info(f"ROC AUC: {val_roc_auc_final:.4f}")
 
-print(f"\nTest Set Performance:")
-print(f"Accuracy: {test_accuracy_final:.4f}")
-print(f"Precision: {test_precision_final:.4f}")
-print(f"Recall: {test_recall_final:.4f}")
-print(f"F1-Score: {test_f1_final:.4f}")
-print(f"ROC AUC: {test_roc_auc_final:.4f}")
+logging.info(f"\nTest Set Performance:")
+logging.info(f"Accuracy: {test_accuracy_final:.4f}")
+logging.info(f"Precision: {test_precision_final:.4f}")
+logging.info(f"Recall: {test_recall_final:.4f}")
+logging.info(f"F1-Score: {test_f1_final:.4f}")
+logging.info(f"ROC AUC: {test_roc_auc_final:.4f}")
 
 # Confusion Matrix for Test Set
-print(f"\nTest Set Confusion Matrix:")
+logging.info(f"\nTest Set Confusion Matrix:")
 cm_test_final = confusion_matrix(y_test_mapped_final, y_test_pred_final)
-print(cm_test_final)
+logging.info(cm_test_final)
 
 # Classification Report for Test Set
-print(f"\nTest Set Classification Report:")
+logging.info(f"\nTest Set Classification Report:")
 reverse_label_mapping_final = {v: k for k, v in label_mapping_final.items()}
 target_names_final = [str(reverse_label_mapping_final[i]) for i in range(num_classes_final)]
-print(classification_report(y_test_mapped_final, y_test_pred_final, target_names=target_names_final))
+logging.info(classification_report(y_test_mapped_final, y_test_pred_final, target_names=target_names_final))
 
 # Performance comparison
-print(f"\n" + "="*60)
-print("PERFORMANCE COMPARISON")
-print("="*60)
+logging.info(f"\n" + "="*60)
+logging.info("PERFORMANCE COMPARISON")
+logging.info("="*60)
 
 performance_comparison_final = pd.DataFrame({
     'Dataset': ['Training', 'Validation', 'Test'],
@@ -1066,17 +1314,17 @@ performance_comparison_final = pd.DataFrame({
     'ROC AUC': [train_roc_auc_final, val_roc_auc_final, test_roc_auc_final]
 })
 
-print(performance_comparison_final.round(4))
+logging.info(performance_comparison_final.round(4))
 
 # Save final results
 final_results_path = 'logs/xgb_results/final_performance_comparison.csv'
 performance_comparison_final.to_csv(final_results_path, index=False)
-print(f"\nFinal performance comparison saved to: {final_results_path}")
+logging.info(f"\nFinal performance comparison saved to: {final_results_path}")
 
 # Save final model
 final_model_path = 'logs/xgb_models/final_tuned_model.pkl'
 joblib.dump(final_model, final_model_path)
-print(f"Final tuned model saved to: {final_model_path}")
+logging.info(f"Final tuned model saved to: {final_model_path}")
 
 # Save final test predictions
 final_test_predictions_dict = {
@@ -1098,33 +1346,38 @@ final_test_predictions_df = pd.DataFrame(final_test_predictions_dict)
 
 final_test_predictions_path = 'logs/xgb_results/final_test_predictions.csv'
 final_test_predictions_df.to_csv(final_test_predictions_path, index=False)
-print(f"Final test predictions saved to: {final_test_predictions_path}")
+logging.info(f"Final test predictions saved to: {final_test_predictions_path}")
 
 # Summary of hyperparameter tuning
-print(f"\n" + "="*60)
-print("HYPERPARAMETER TUNING SUMMARY")
-print("="*60)
+logging.info(f"\n" + "="*60)
+logging.info("HYPERPARAMETER TUNING SUMMARY")
+logging.info("="*60)
 
-print(f"\nBest XGBoost Parameters:")
+logging.info(f"\nBest XGBoost-Only Parameters:")
 for param, value in best_xgb_params.items():
-    print(f"  {param}: {value}")
+    logging.info(f"  {param}: {value}")
 
-print(f"\nBest Triple Barrier Parameters:")
+logging.info(f"\nBest Combined XGBoost Parameters:")
+for param, value in best_xgb_params_combined.items():
+    logging.info(f"  {param}: {value}")
+
+logging.info(f"\nBest Combined Barrier Parameters:")
 for param, value in best_barrier_params.items():
-    print(f"  {param}: {value}")
+    logging.info(f"  {param}: {value}")
 
-print(f"\nPerformance Improvements:")
-print(f"Original Model Validation Accuracy: {original_val_accuracy:.4f}")
-print(f"XGBoost Tuned Validation Accuracy: {best_xgb_score:.4f}")
-print(f"Final Tuned Model Test Accuracy: {test_accuracy_final:.4f}")
+logging.info(f"\nPerformance Improvements:")
+logging.info(f"Original Model Validation Accuracy: 0.6295")
+logging.info(f"XGBoost-Only Tuned Validation Accuracy: {best_xgb_score:.4f}")
+logging.info(f"Combined Tuned Validation Accuracy: {best_combined_score:.4f}")
+logging.info(f"Final Tuned Model Test Accuracy: {test_accuracy_final:.4f}")
 
-print(f"\nFinal Model Generalization:")
-print(f"Training Accuracy: {train_accuracy_final:.4f}")
-print(f"Validation Accuracy: {val_accuracy_final:.4f}")
-print(f"Test Accuracy: {test_accuracy_final:.4f}")
-print(f"Train-Val Gap: {train_accuracy_final - val_accuracy_final:.4f}")
-print(f"Train-Test Gap: {train_accuracy_final - test_accuracy_final:.4f}")
+logging.info(f"\nFinal Model Generalization:")
+logging.info(f"Training Accuracy: {train_accuracy_final:.4f}")
+logging.info(f"Validation Accuracy: {val_accuracy_final:.4f}")
+logging.info(f"Test Accuracy: {test_accuracy_final:.4f}")
+logging.info(f"Train-Val Gap: {train_accuracy_final - val_accuracy_final:.4f}")
+logging.info(f"Train-Test Gap: {train_accuracy_final - test_accuracy_final:.4f}")
 
-print("\n" + "="*80)
-print("HYPERPARAMETER TUNING COMPLETED SUCCESSFULLY!")
-print("="*80)
+logging.info("\n" + "="*80)
+logging.info("HYPERPARAMETER TUNING COMPLETED SUCCESSFULLY!")
+logging.info("="*80)
