@@ -383,100 +383,164 @@ class XGBoostInference:
             raise FileNotFoundError(f"Training data not found at {train_data_path}")
 
     
+    def _load_historical_data(self):
+        """Load historical processed data for feature engineering"""
+        try:
+            historical_path = '/root/vynixmodelling/dataset/main_processed_data.csv'
+            if Path(historical_path).exists():
+                historical_df = pd.read_csv(historical_path)
+                historical_df['date'] = pd.to_datetime(historical_df['date'])
+                print(f"Historical data loaded: {len(historical_df)} rows from {historical_df['date'].min()} to {historical_df['date'].max()}")
+                return historical_df
+            else:
+                print(f"Historical data file not found at {historical_path}")
+                return None
+        except Exception as e:
+            print(f"Error loading historical data: {e}")
+            return None
+    
     def _apply_basic_feature_engineering(self, raw_df, ticker="TSLA"):
         try:
-            # Create a copy of the raw data
-            enhanced_df = raw_df.copy()
+            # Load historical data for proper feature engineering
+            historical_df = self._load_historical_data()
             
-            # Apply all feature engineering functions
-            for name, func in feature_functions:
-                try:
-                    result = func(enhanced_df)
-                    enhanced_df[name] = result
-                    
-                    # Debug: Check if result is NaN or 0 and why
-                    if isinstance(result, pd.Series):
-                        final_val = result.iloc[0] if len(result) > 0 else 0
+            if historical_df is not None:
+                # Use the most recent row from historical data that matches our features
+                # Get the latest date from historical data
+                latest_historical = historical_df.iloc[-1:].copy()
+                
+                # Create enhanced_df by combining raw fundamental data with historical features
+                enhanced_df = raw_df.copy()
+                
+                # Copy pre-calculated features from historical data
+                feature_columns = [
+                    'current_ratio', 'quick_ratio', 'cash_ratio', 'working_capital',
+                    'accounts_receivable_turnover', 'days_sales_outstanding', 'inventory_turnover',
+                    'days_inventory_outstanding', 'accounts_payable_turnover', 'days_payable_outstanding',
+                    'cash_conversion_cycle', 'gross_profit_margin', 'operating_profit_margin',
+                    'net_profit_margin', 'return_on_assets', 'return_on_equity', 'debt_to_equity_ratio',
+                    'debt_to_assets_ratio', 'interest_coverage_ratio', 'operating_expense_ratio',
+                    'rd_to_revenue_ratio', 'sga_to_revenue_ratio', 'fixed_asset_turnover',
+                    'total_asset_turnover', 'capital_expenditure_ratio', 'compensation_efficiency',
+                    'warranty_reserve_ratio', 'depreciation_rate', 'operating_cash_flow_to_net_income_ratio',
+                    'effective_tax_rate', 'revenue_growth_rate', 'net_income_growth_rate',
+                    'asset_growth_rate', 'accrual_ratio', 'cash_flow_to_revenue_ratio',
+                    'return_on_invested_capital', 'cash_return_on_capital_invested',
+                    'fixed_assets_to_long_term_debt_ratio', 'non_current_asset_turnover',
+                    'quarterly_gross_profit_stability', 'revenue_to_expense_growth_differential',
+                    'quarterly_cash_flow_quality', 'dividend_payout_ratio',
+                    'stock_based_compensation_to_operating_expense_ratio', 'financial_leverage_index',
+                    'asset_coverage_ratio', 'quarterly_margin_expansion', 'asset_utilization_ratio',
+                    'capacity_utilization_proxy', 'altman_z_score', 'dupont_analysis_roe',
+                    'economic_value_added', 'rd_efficiency_ratio', 'innovation_investment_ratio',
+                    'revenue_momentum', 'earnings_momentum', 'quarterly_earnings_quality_index',
+                    'non_operating_items_ratio', 'revenues_qoq_growth', 'revenues_yoy_growth',
+                    'revenues_ttm', 'revenues_acceleration', 'revenues_seasonal_index',
+                    'revenues_moving_avg', 'revenues_run_rate', 'revenues_volatility',
+                    'revenues_seasonal_dependency', 'net_income_qoq_growth', 'net_income_yoy_growth',
+                    'net_income_ttm', 'net_income_acceleration', 'net_income_seasonal_index',
+                    'net_income_moving_avg', 'net_income_run_rate', 'net_income_volatility',
+                    'assets_qoq_growth', 'assets_yoy_growth', 'assets_ttm',
+                    'operating_income_qoq_growth', 'operating_income_yoy_growth', 'operating_income_ttm',
+                    'cash_qoq_growth', 'cash_yoy_growth', 'equity_qoq_growth', 'equity_yoy_growth',
+                    'liabilities_qoq_growth', 'liabilities_yoy_growth', 'quarterly_operating_leverage',
+                    'quarterly_cash_burn_rate', 'revenues_ytd', 'netincomeloss_ytd',
+                    'operatingincomeloss_ytd', 'long_term_revenue_cagr', 'operating_margin_trend'
+                ]
+                
+                # Copy features from historical data
+                for feature in feature_columns:
+                    if feature in latest_historical.columns:
+                        enhanced_df[feature] = latest_historical[feature].iloc[0]
+                        print(f"Using historical value for {feature}: {enhanced_df[feature].iloc[0] if len(enhanced_df) > 0 else 'N/A'}")
                     else:
-                        final_val = result
-                    
-                    if pd.isna(final_val) or final_val == 0:
-                        print(f"DEBUG - {name}: result={final_val} (likely needs historical data for growth/trend calculation)")
-                        
-                except Exception as e:
-                    enhanced_df[name] = 0
-                    pass
+                        enhanced_df[feature] = 0
+                        print(f"Feature {feature} not found in historical data, setting to 0")
+                
+                # Fill remaining features with zeros for features not calculated
+                for feature in self.feature_columns:
+                    if feature not in enhanced_df.columns:
+                        enhanced_df[feature] = 0
+                
+                # Replace infinite values with NaN, then fill with 0
+                enhanced_df = enhanced_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+                
+                print(f"Feature engineering completed using historical data")
+                return enhanced_df
             
-            # Apply column-based functions
-            for name, column, func in column_based_functions:
-                try:
-                    if column in enhanced_df.columns:
-                        result = func(enhanced_df, column)
+            else:
+                # Fallback to original method if historical data not available
+                print("Using fallback feature engineering method")
+                enhanced_df = raw_df.copy()
+                
+                # Apply all feature engineering functions
+                for name, func in feature_functions:
+                    try:
+                        result = func(enhanced_df)
                         enhanced_df[name] = result
-                        
-                        # Debug: Check if result is NaN or 0 and why
-                        if isinstance(result, pd.Series):
-                            final_val = result.iloc[0] if len(result) > 0 else 0
-                        else:
-                            final_val = result
-                        
-                        if pd.isna(final_val) or final_val == 0:
-                            print(f"DEBUG - {name}: result={final_val} (column-based function needs historical data)")
-                    else:
+                    except Exception as e:
                         enhanced_df[name] = 0
-                except Exception as e:
-                    enhanced_df[name] = 0
-                    pass
-            
-            # Apply special functions
-            try:
-                enhanced_df['quarterly_operating_leverage'] = quarterly_operating_leverage(enhanced_df)
-            except Exception as e:
-                enhanced_df['quarterly_operating_leverage'] = 0
-                pass
-            
-            try:
-                enhanced_df['quarterly_cash_burn_rate'] = quarterly_cash_burn_rate(enhanced_df)
-            except Exception as e:
-                enhanced_df['quarterly_cash_burn_rate'] = 0
-                pass
-            
-            # Apply YTD functions for key columns
-            ytd_columns = ['Revenues', 'NetIncomeLoss', 'OperatingIncomeLoss']
-            for col in ytd_columns:
+                        pass
+                
+                # Apply column-based functions
+                for name, column, func in column_based_functions:
+                    try:
+                        if column in enhanced_df.columns:
+                            result = func(enhanced_df, column)
+                            enhanced_df[name] = result
+                    except Exception as e:
+                        enhanced_df[name] = 0
+                        pass
+                
+                # Apply special functions
                 try:
-                    if col in enhanced_df.columns:
-                        enhanced_df[f'{col.lower()}_ytd'] = ytd_performance(enhanced_df, col)
-                    else:
-                        enhanced_df[f'{col.lower()}_ytd'] = 0
+                    enhanced_df['quarterly_operating_leverage'] = quarterly_operating_leverage(enhanced_df)
                 except Exception as e:
-                    enhanced_df[f'{col.lower()}_ytd'] = 0
+                    enhanced_df['quarterly_operating_leverage'] = 0
                     pass
-            
-            # Apply CAGR function
-            try:
-                enhanced_df['long_term_revenue_cagr'] = long_term_revenue_cagr(enhanced_df)
-            except Exception as e:
-                enhanced_df['long_term_revenue_cagr'] = 0
-                pass
-            
-            # Apply trend function
-            try:
-                enhanced_df['operating_margin_trend'] = operating_margin_trend(enhanced_df)
-            except Exception as e:
-                enhanced_df['operating_margin_trend'] = 0
-                pass
-            
-            # Fill remaining features with zeros for features not calculated
-            for feature in self.feature_columns:
-                if feature not in enhanced_df.columns:
-                    enhanced_df[feature] = 0
-            
-            # Replace infinite values with NaN, then fill with 0
-            enhanced_df = enhanced_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-            
-            print(f"Feature engineering completed. Generated {len(enhanced_df.columns)} features.")
-            return enhanced_df
+                
+                try:
+                    enhanced_df['quarterly_cash_burn_rate'] = quarterly_cash_burn_rate(enhanced_df)
+                except Exception as e:
+                    enhanced_df['quarterly_cash_burn_rate'] = 0
+                    pass
+                
+                # Apply YTD functions for key columns
+                ytd_columns = ['Revenues', 'NetIncomeLoss', 'OperatingIncomeLoss']
+                for col in ytd_columns:
+                    try:
+                        if col in enhanced_df.columns:
+                            enhanced_df[f'{col.lower()}_ytd'] = ytd_performance(enhanced_df, col)
+                        else:
+                            enhanced_df[f'{col.lower()}_ytd'] = 0
+                    except Exception as e:
+                        enhanced_df[f'{col.lower()}_ytd'] = 0
+                        pass
+                
+                # Apply CAGR function
+                try:
+                    enhanced_df['long_term_revenue_cagr'] = long_term_revenue_cagr(enhanced_df)
+                except Exception as e:
+                    enhanced_df['long_term_revenue_cagr'] = 0
+                    pass
+                
+                # Apply trend function
+                try:
+                    enhanced_df['operating_margin_trend'] = operating_margin_trend(enhanced_df)
+                except Exception as e:
+                    enhanced_df['operating_margin_trend'] = 0
+                    pass
+                
+                # Fill remaining features with zeros for features not calculated
+                for feature in self.feature_columns:
+                    if feature not in enhanced_df.columns:
+                        enhanced_df[feature] = 0
+                
+                # Replace infinite values with NaN, then fill with 0
+                enhanced_df = enhanced_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+                
+                print(f"Feature engineering completed. Generated {len(enhanced_df.columns)} features.")
+                return enhanced_df
             
         except Exception as e:
             print(f"Error in feature engineering: {e}")
@@ -629,7 +693,6 @@ class XGBoostInference:
                 tech_df = technical_data.copy()
             else:
                 raise ValueError("Technical data must be a dict or pandas DataFrame")
-            
             return tech_df
             
         except Exception as e:
@@ -650,66 +713,126 @@ class XGBoostInference:
             print(f"Error getting feature importance: {e}")
             return None
 
-# Sample raw fundamental data
-raw_fundamental_data = {
-    'AccountsPayableCurrent': 303969000.0,
-    'AccountsReceivableNetCurrent': 49109000.0,
-    'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment': 140142000.0,
-    'AccumulatedOtherComprehensiveIncomeLossNetOfTax': -3000.0,
-    'AdditionalPaidInCapitalCommonStock': 1806617000.0,
-    'AllocatedShareBasedCompensationExpense': 55566000.0,
-    'Assets': 2416930000.0,
-    'AssetsCurrent': 1265939000.0,
-    'CashAndCashEquivalentsAtCarryingValue': 201890000.0,
-    'CommonStockValue': 123000.0,
-    'ComprehensiveIncomeNetOfTax': -254414000.0,
-    'CostOfRevenue': 1098604000.0,
-    'EmployeeRelatedLiabilitiesCurrent': 26535000.0,
-    'GrossProfit': 299673000.0,
-    'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest': -56520000.0,
-    'IncomeTaxExpenseBenefit': 1230000.0,
-    'IncreaseDecreaseInAccountsPayableAndAccruedLiabilities': 5862000.0,
-    'IncreaseDecreaseInAccountsReceivable': 20716000.0,
-    'IncreaseDecreaseInOtherNoncurrentLiabilities': 28669000.0,
-    'IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets': 9115000.0,
-    'InterestCostsCapitalized': 2300000.0,
-    'InterestExpense': 26705000.0,
-    'InventoryNet': 340355000.0,
-    'InventoryWriteDown': 6788000.0,
-    'InvestmentIncomeInterest': 97000.0,
-    'Liabilities': 1749810000.0,
-    'LiabilitiesAndStockholdersEquity': 2416930000.0,
-    'LiabilitiesCurrent': 675160000.0,
-    'NetCashProvidedByUsedInFinancingActivities': 3684000.0,
-    'NetCashProvidedByUsedInInvestingActivities': -55236000.0,
-    'NetCashProvidedByUsedInOperatingActivities': 64079000.0,
-    'NetIncomeLoss': -57750000.0,
-    'NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1': 24708000.0,
-    'NoncurrentAssets': 1120919000.0,
-    'OperatingExpenses': 347603000.0,
-    'OperatingIncomeLoss': -47930000.0,
-    'OtherAssetsNoncurrent': 23637000.0,
-    'OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax': -16147000.0,
-    'OtherLiabilitiesNoncurrent': 58197000.0,
-    'OtherNonoperatingIncomeExpense': 18018000.0,
-    'PaymentsToAcquirePropertyPlantAndEquipment': 174790000.0,
-    'PrepaidExpenseAndOtherAssetsCurrent': 27574000.0,
-    'ProceedsFromIssuanceOfSharesUnderIncentiveAndShareBasedCompensationPlansIncludingStockOptions': 82219000.0,
-    'ProductWarrantyAccrualPreexistingIncreaseDecrease': 8052000.0,
-    'PropertyPlantAndEquipmentGross': 878636000.0,
-    'PropertyPlantAndEquipmentNet': 738494000.0,
-    'ResearchAndDevelopmentExpense': 163523000.0,
-    'RetainedEarningsAccumulatedDeficit': -1139620000.0,
-    'Revenues': 1398277000.0,
-    'SellingGeneralAndAdministrativeExpense': 184080000.0,
-    'ShareBasedCompensation': 55566000.0,
-    'StandardProductWarrantyAccrual': 13012000.0,
-    'StandardProductWarrantyAccrualPayments': 11100000.0,
-    'StandardProductWarrantyAccrualWarrantiesIssued': 43758000.0,
-    'StockholdersEquity': 667120000.0,
-    'TaxesPayableCurrent': 38067000.0,
-    'UnrecognizedTaxBenefits': 13400000.0
-}
+# Load sample raw fundamental data from inference.csv
+def load_sample_fundamental_data():
+    """
+    Load fundamental data from inference.csv, extracting only raw fundamental columns
+    and excluding technical indicators. Manual feature engineering will still be performed.
+    """
+    try:
+        inference_df = pd.read_csv('/root/vynixmodelling/dataset/training_data/inference.csv')
+        
+        # Get the latest row of data
+        latest_row = inference_df.iloc[-1]
+        
+        # Define fundamental data columns (exclude technical indicators)
+        fundamental_columns = [
+            'AccountsPayableCurrent', 'AccountsReceivableNetCurrent', 
+            'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment',
+            'AccumulatedOtherComprehensiveIncomeLossNetOfTax', 'AdditionalPaidInCapitalCommonStock',
+            'AllocatedShareBasedCompensationExpense', 'Assets', 'AssetsCurrent',
+            'CashAndCashEquivalentsAtCarryingValue', 'CommonStockValue', 'ComprehensiveIncomeNetOfTax',
+            'CostOfRevenue', 'EmployeeRelatedLiabilitiesCurrent', 'GrossProfit',
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest',
+            'IncomeTaxExpenseBenefit', 'IncreaseDecreaseInAccountsPayableAndAccruedLiabilities',
+            'IncreaseDecreaseInAccountsReceivable', 'IncreaseDecreaseInOtherNoncurrentLiabilities',
+            'IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets', 'InterestCostsCapitalized',
+            'InterestExpense', 'InventoryNet', 'InventoryWriteDown', 'InvestmentIncomeInterest',
+            'Liabilities', 'LiabilitiesAndStockholdersEquity', 'LiabilitiesCurrent',
+            'NetCashProvidedByUsedInFinancingActivities', 'NetCashProvidedByUsedInInvestingActivities',
+            'NetCashProvidedByUsedInOperatingActivities', 'NetIncomeLoss',
+            'NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1', 'NoncurrentAssets',
+            'OperatingExpenses', 'OperatingIncomeLoss', 'OtherAssetsNoncurrent',
+            'OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax',
+            'OtherLiabilitiesNoncurrent', 'OtherNonoperatingIncomeExpense',
+            'PaymentsToAcquirePropertyPlantAndEquipment', 'PrepaidExpenseAndOtherAssetsCurrent',
+            'ProceedsFromIssuanceOfSharesUnderIncentiveAndShareBasedCompensationPlansIncludingStockOptions',
+            'ProductWarrantyAccrualPreexistingIncreaseDecrease', 'PropertyPlantAndEquipmentGross',
+            'PropertyPlantAndEquipmentNet', 'ResearchAndDevelopmentExpense',
+            'RetainedEarningsAccumulatedDeficit', 'Revenues', 'SellingGeneralAndAdministrativeExpense',
+            'ShareBasedCompensation', 'StandardProductWarrantyAccrual',
+            'StandardProductWarrantyAccrualPayments', 'StandardProductWarrantyAccrualWarrantiesIssued',
+            'StockholdersEquity', 'TaxesPayableCurrent', 'UnrecognizedTaxBenefits'
+        ]
+        
+        # Create dictionary with only fundamental data columns that exist in the CSV
+        raw_fundamental_data = {}
+        for col in fundamental_columns:
+            if col in latest_row.index:
+                value = latest_row[col]
+                # Convert to float if not NaN, otherwise set to 0
+                raw_fundamental_data[col] = float(value) if pd.notna(value) else 0.0
+        
+        print(f"Loaded fundamental data from inference.csv with {len(raw_fundamental_data)} columns")
+        print(f"Sample values: Assets={raw_fundamental_data.get('Assets', 0):,.0f}, Revenues={raw_fundamental_data.get('Revenues', 0):,.0f}")
+        return raw_fundamental_data
+        
+    except Exception as e:
+        print(f"Error loading inference.csv: {e}")
+        print("Using fallback sample data...")
+        # Fallback to original sample data
+        # return {
+        #     'AccountsPayableCurrent': 303969000.0,
+        #     'AccountsReceivableNetCurrent': 49109000.0,
+        #     'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment': 140142000.0,
+        #     'AccumulatedOtherComprehensiveIncomeLossNetOfTax': -3000.0,
+        #     'AdditionalPaidInCapitalCommonStock': 1806617000.0,
+        #     'AllocatedShareBasedCompensationExpense': 55566000.0,
+        #     'Assets': 2416930000.0,
+        #     'AssetsCurrent': 1265939000.0,
+        #     'CashAndCashEquivalentsAtCarryingValue': 201890000.0,
+        #     'CommonStockValue': 123000.0,
+        #     'ComprehensiveIncomeNetOfTax': -254414000.0,
+        #     'CostOfRevenue': 1098604000.0,
+        #     'EmployeeRelatedLiabilitiesCurrent': 26535000.0,
+        #     'GrossProfit': 299673000.0,
+        #     'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest': -56520000.0,
+        #     'IncomeTaxExpenseBenefit': 1230000.0,
+        #     'IncreaseDecreaseInAccountsPayableAndAccruedLiabilities': 5862000.0,
+        #     'IncreaseDecreaseInAccountsReceivable': 20716000.0,
+        #     'IncreaseDecreaseInOtherNoncurrentLiabilities': 28669000.0,
+        #     'IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets': 9115000.0,
+        #     'InterestCostsCapitalized': 2300000.0,
+        #     'InterestExpense': 26705000.0,
+        #     'InventoryNet': 340355000.0,
+        #     'InventoryWriteDown': 6788000.0,
+        #     'InvestmentIncomeInterest': 97000.0,
+        #     'Liabilities': 1749810000.0,
+        #     'LiabilitiesAndStockholdersEquity': 2416930000.0,
+        #     'LiabilitiesCurrent': 675160000.0,
+        #     'NetCashProvidedByUsedInFinancingActivities': 3684000.0,
+        #     'NetCashProvidedByUsedInInvestingActivities': -55236000.0,
+        #     'NetCashProvidedByUsedInOperatingActivities': 64079000.0,
+        #     'NetIncomeLoss': -57750000.0,
+        #     'NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1': 24708000.0,
+        #     'NoncurrentAssets': 1120919000.0,
+        #     'OperatingExpenses': 347603000.0,
+        #     'OperatingIncomeLoss': -47930000.0,
+        #     'OtherAssetsNoncurrent': 23637000.0,
+        #     'OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax': -16147000.0,
+        #     'OtherLiabilitiesNoncurrent': 58197000.0,
+        #     'OtherNonoperatingIncomeExpense': 18018000.0,
+        #     'PaymentsToAcquirePropertyPlantAndEquipment': 174790000.0,
+        #     'PrepaidExpenseAndOtherAssetsCurrent': 27574000.0,
+        #     'ProceedsFromIssuanceOfSharesUnderIncentiveAndShareBasedCompensationPlansIncludingStockOptions': 82219000.0,
+        #     'ProductWarrantyAccrualPreexistingIncreaseDecrease': 8052000.0,
+        #     'PropertyPlantAndEquipmentGross': 878636000.0,
+        #     'PropertyPlantAndEquipmentNet': 738494000.0,
+        #     'ResearchAndDevelopmentExpense': 163523000.0,
+        #     'RetainedEarningsAccumulatedDeficit': -1139620000.0,
+        #     'Revenues': 1398277000.0,
+        #     'SellingGeneralAndAdministrativeExpense': 184080000.0,
+        #     'ShareBasedCompensation': 55566000.0,
+        #     'StandardProductWarrantyAccrual': 13012000.0,
+        #     'StandardProductWarrantyAccrualPayments': 11100001.0,
+        #     'StandardProductWarrantyAccrualWarrantiesIssued': 43758000.0,
+        #     'StockholdersEquity': 667120000.0,
+        #     'TaxesPayableCurrent': 38067000.0,
+        #     'UnrecognizedTaxBenefits': 13400000.0
+        # }
+
+# Load sample raw fundamental data from inference.csv
+raw_fundamental_data = load_sample_fundamental_data()
 
 # Sample technical data
 technical_data = {
@@ -732,9 +855,131 @@ technical_data = {
 }
 
 
+def evaluate_test_data():
+    """Evaluate model performance on test dataset"""
+    print("\n=== Batch Evaluation on Test Dataset ===")
+    
+    # Load test data
+    try:
+        X_test = pd.read_csv('/root/vynixmodelling/dataset/training_data/X_test.csv')
+        y_test = pd.read_csv('/root/vynixmodelling/dataset/training_data/y_test.csv')
+        
+        print(f"Loaded {len(X_test)} test samples")
+        print(f"Test data shape: {X_test.shape}")
+        print(f"Labels shape: {y_test.shape}")
+        
+    except Exception as e:
+        print(f"Error loading test data: {e}")
+        return
+    
+    # Initialize inference model
+    try:
+        inference = XGBoostInference()
+        print("Model loaded successfully")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return
+    
+    # Prepare for batch prediction
+    predictions = []
+    predicted_labels_mapped = []
+    true_labels = y_test['label'].values
+    
+    print("\nProcessing test samples...")
+    
+    # Process each test sample
+    for i in range(len(X_test)):
+        try:
+            # Get current row
+            row = X_test.iloc[i]
+            
+            # Separate technical and fundamental data
+            technical_columns = ['entry_price', 'upper_barrier', 'lower_barrier', 'open', 'high', 'low', 'close', 
+                               'Volume', 'Histogram', 'MACD', 'Signal', 'K', 'D', 'Turnover (Cr)', 
+                               '10 MA Turnover', 'Turnover / 10MA (X)']
+            
+            # Extract technical data
+            technical_data = {}
+            for col in technical_columns:
+                if col in row.index:
+                    technical_data[col] = row[col]
+            
+            # Extract fundamental data (all other columns)
+            fundamental_columns = [col for col in X_test.columns if col not in technical_columns]
+            raw_fundamental_data = {}
+            for col in fundamental_columns:
+                raw_fundamental_data[col] = row[col]
+            
+            # Make prediction
+            results = inference.predict(
+                raw_fundamental_data=raw_fundamental_data,
+                technical_data=technical_data,
+                ticker="TSLA"
+            )
+            
+            predictions.append(results['predicted_label'])
+            predicted_labels_mapped.append(results['predicted_label_mapped'])
+            
+            # Progress indicator
+            if (i + 1) % 50 == 0:
+                print(f"Processed {i + 1}/{len(X_test)} samples")
+                
+        except Exception as e:
+            print(f"Error processing sample {i}: {e}")
+            predictions.append(0)  # Default prediction
+            predicted_labels_mapped.append(0)
+    
+    # Calculate accuracy metrics
+    predictions = np.array(predictions)
+    predicted_labels_mapped = np.array(predicted_labels_mapped)
+    
+    # Accuracy using original labels (-1, 0, 1)
+    accuracy_original = np.mean(predictions == true_labels)
+    
+    # Accuracy using mapped labels (0, 1, 2)
+    accuracy_mapped = np.mean(predicted_labels_mapped == true_labels)
+    
+    print(f"\n=== Evaluation Results ===")
+    print(f"Total test samples: {len(X_test)}")
+    print(f"Accuracy (original labels): {accuracy_original:.4f} ({accuracy_original*100:.2f}%)")
+    print(f"Accuracy (mapped labels): {accuracy_mapped:.4f} ({accuracy_mapped*100:.2f}%)")
+    
+    # Class distribution
+    unique_true, counts_true = np.unique(true_labels, return_counts=True)
+    unique_pred, counts_pred = np.unique(predictions, return_counts=True)
+    
+    print(f"\nTrue label distribution:")
+    for label, count in zip(unique_true, counts_true):
+        print(f"  Class {label}: {count} samples ({count/len(true_labels)*100:.1f}%)")
+    
+    print(f"\nPredicted label distribution:")
+    for label, count in zip(unique_pred, counts_pred):
+        print(f"  Class {label}: {count} samples ({count/len(predictions)*100:.1f}%)")
+    
+    # Confusion matrix-like analysis
+    print(f"\n=== Per-Class Analysis ===")
+    for true_class in unique_true:
+        mask = true_labels == true_class
+        class_predictions = predictions[mask]
+        class_accuracy = np.mean(class_predictions == true_class)
+        print(f"Class {true_class} accuracy: {class_accuracy:.4f} ({class_accuracy*100:.2f}%)")
+    
+    return {
+        'accuracy_original': accuracy_original,
+        'accuracy_mapped': accuracy_mapped,
+        'predictions': predictions,
+        'true_labels': true_labels,
+        'predicted_labels_mapped': predicted_labels_mapped
+    }
+
+
 if __name__ == "__main__":
-    # Example usage with combined fundamental and technical data
-    print("\n=== Combined Fundamental + Technical Data Prediction ===")
+    # Run batch evaluation on test dataset
+    results = evaluate_test_data()
+    
+    # Optional: Show single sample prediction example
+    print("\n" + "="*50)
+    print("=== Single Sample Example ===")
     try:
         inference = XGBoostInference()
         results = inference.predict(
@@ -756,4 +1001,4 @@ if __name__ == "__main__":
             print(importance_df.to_string(index=False))
             
     except Exception as e:
-        print(f"Error in prediction: {e}")
+        print(f"Error in single prediction: {e}")

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
+import logging
 
 def current_ratio(df):
     return df['AssetsCurrent'] / df['LiabilitiesCurrent']
