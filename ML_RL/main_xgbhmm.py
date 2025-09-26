@@ -1,24 +1,530 @@
-# Import Section
-import numpy as np
+# XGB-HMM Implementation Classes
 import pandas as pd
-import warnings
+import numpy as np
 import logging
-from utils.get_ticker import *
-from utils.load_data import *
-from fundamental_feature_engineering import *
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
-import joblib
 import time
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
+from hmmlearn.hmm import GaussianHMM
+import xgboost as xgb
+from xgboost import XGBClassifier
 import optuna
-from triple_barrier.triplebarrier import apply_triple_barrier_labeling
-
-logging.basicConfig(level=logging.INFO)
+from optuna import create_study
+from optuna.storages import InMemoryStorage
+from optuna.samplers import TPESampler
+from optuna.pruners import MedianPruner
+from scipy.special import logsumexp
+import warnings
 warnings.filterwarnings('ignore')
+
+# Additional imports for the main script
+from datetime import datetime
+import os
+from fundamental_feature_engineering import apply_feature_engineering
+from technical_fundamental_preprocessing import preprocess_technical_fundamental_data
+from triple_barrier.triplebarrier import apply_triple_barrier_labeling
+from triple_barrier.visualizebarrier import generate_triple_barrier_visualizations
+from utils.load_data import process_fundamental_data_local, get_fundamental_data_local, process_fundamental_data
+
+class XGBHMMModel:
+    """
+    Hybrid XGBoost-HMM Model for Sequential Classification
+    Combines HMM temporal modeling with XGBoost emission probabilities
+    """
+    
+    def __init__(self, n_states=3, max_iter=50, tol=1e-4, random_state=42):
+        self.n_states = n_states
+        self.max_iter = max_iter
+        self.tol = tol
+        self.random_state = random_state
+        
+        # Model components
+        self.gmm_hmm = None
+        self.xgb_model = None
+        self.transition_matrix = None
+        self.start_prob = None
+        self.emission_model = None
+        
+        # Training history
+        self.log_likelihood_history = []
+        self.convergence_info = {}
+        
+    def _initialize_gmm_hmm(self, X, y):
+        """Initialize GMM-HMM for initial state estimation"""
+        logging.info("Initializing GMM-HMM for state estimation...")
+        
+        # Handle NaN values by filling with median
+        X_clean = X.fillna(X.median())
+        
+        # Convert to numpy array if it's a DataFrame
+        if hasattr(X_clean, 'values'):
+            X_array = X_clean.values
+        else:
+            X_array = X_clean
+        
+        # Initialize Gaussian HMM with diagonal covariance for stability
+        self.gmm_hmm = GaussianHMM(
+            n_components=self.n_states,
+            covariance_type="diag",  # Use diagonal covariance for numerical stability
+            random_state=self.random_state,
+            n_iter=20,
+            tol=1e-2,  # More lenient tolerance
+            min_covar=1e-3  # Add minimum covariance for numerical stability
+        )
+        
+        # Fit GMM-HMM to get initial state sequences
+        self.gmm_hmm.fit(X_array)
+        
+        # Get state sequences and probabilities
+        state_sequences = self.gmm_hmm.predict(X_array)
+        gamma = self.gmm_hmm.predict_proba(X_array)
+        
+        # Extract transition matrix and start probabilities
+        self.transition_matrix = self.gmm_hmm.transmat_
+        self.start_prob = self.gmm_hmm.startprob_
+        
+        # logging.info(f"GMM-HMM initialization completed. States: {self.n_states}")
+        # logging.info(f"Initial transition matrix shape: {self.transition_matrix.shape}")
+        
+        return state_sequences, gamma
+    
+    def _train_xgb_emission_model(self, X, y, gamma):
+        """Train XGBoost model for emission probabilities"""
+        logging.info("Training XGBoost emission model...")
+        
+        # Prepare training data with state probabilities
+        n_samples, n_features = X.shape
+        
+        # Create expanded training data
+        X_expanded = []
+        y_expanded = []
+        weights_expanded = []
+        
+        for i in range(n_samples):
+            for state in range(self.n_states):
+                if gamma[i, state] > 0.01:  # Only include significant state probabilities
+                    X_expanded.append(X.iloc[i].values)
+                    y_expanded.append(y.iloc[i])
+                    weights_expanded.append(gamma[i, state])
+        
+        X_expanded = np.array(X_expanded)
+        y_expanded = np.array(y_expanded)
+        weights_expanded = np.array(weights_expanded)
+        
+        # logging.info(f"Expanded training data shape: {X_expanded.shape}")
+        
+        # Determine XGBoost parameters based on label distribution
+        unique_labels = np.unique(y_expanded)
+        if len(unique_labels) == 2:
+            objective = 'binary:logistic'
+            eval_metric = 'logloss'
+            num_class = None
+        else:
+            objective = 'multi:softmax'
+            eval_metric = 'mlogloss'
+            num_class = len(unique_labels)
+        
+        # Initialize XGBoost with optimal parameters
+        # Import XGBoost here to avoid global import
+        from xgboost import XGBClassifier
+        
+        self.xgb_model = XGBClassifier(
+            objective=objective,
+            num_class=num_class,
+            n_estimators=200,
+            learning_rate=0.1,
+            max_depth=6,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            random_state=self.random_state,
+            n_jobs=-1,
+            verbosity=0
+        )
+        
+        # Train XGBoost model
+        self.xgb_model.fit(X_expanded, y_expanded, sample_weight=weights_expanded)
+        
+        # logging.info("XGBoost emission model training completed.")
+        return self.xgb_model
+    
+    def _compute_emission_probabilities(self, X):
+        """Compute emission probabilities using XGBoost"""
+        if self.xgb_model is None:
+            raise ValueError("XGBoost model not trained yet")
+        
+        # Handle NaN values by filling with median
+        X = np.array(X)
+        if np.isnan(X).any():
+            for col in range(X.shape[1]):
+                col_median = np.nanmedian(X[:, col])
+                X[:, col] = np.where(np.isnan(X[:, col]), col_median, X[:, col])
+        
+        # Get XGBoost predictions
+        emission_probs = self.xgb_model.predict_proba(X)
+        
+        # Ensure probabilities are normalized
+        emission_probs = emission_probs / emission_probs.sum(axis=1, keepdims=True)
+        
+        return emission_probs
+    
+    def _forward_backward_algorithm(self, X):
+        """Implement forward-backward algorithm for state estimation"""
+        n_samples = len(X)
+        
+        # Get emission probabilities
+        emission_probs = self._compute_emission_probabilities(X)
+        
+        # Forward algorithm
+        alpha = np.zeros((n_samples, self.n_states))
+        
+        # Initialize
+        alpha[0] = self.start_prob * emission_probs[0]
+        alpha[0] = alpha[0] / np.sum(alpha[0])
+        
+        # Forward pass
+        for t in range(1, n_samples):
+            for j in range(self.n_states):
+                alpha[t, j] = emission_probs[t, j] * np.sum(
+                    alpha[t-1] * self.transition_matrix[:, j]
+                )
+            alpha[t] = alpha[t] / np.sum(alpha[t])
+        
+        # Backward algorithm
+        beta = np.zeros((n_samples, self.n_states))
+        beta[-1] = 1.0
+        
+        # Backward pass
+        for t in range(n_samples-2, -1, -1):
+            for i in range(self.n_states):
+                beta[t, i] = np.sum(
+                    self.transition_matrix[i] * emission_probs[t+1] * beta[t+1]
+                )
+            if np.sum(beta[t]) > 0:
+                beta[t] = beta[t] / np.sum(beta[t])
+        
+        # Compute gamma (state probabilities)
+        gamma = alpha * beta
+        gamma = gamma / gamma.sum(axis=1, keepdims=True)
+        
+        return alpha, beta, gamma
+    
+    def _update_transition_matrix(self, X, gamma):
+        """Update transition matrix using EM algorithm"""
+        n_samples = len(X)
+        
+        # Get emission probabilities
+        emission_probs = self._compute_emission_probabilities(X)
+        
+        # Compute xi (transition probabilities)
+        xi = np.zeros((n_samples-1, self.n_states, self.n_states))
+        
+        for t in range(n_samples-1):
+            denominator = 0
+            for i in range(self.n_states):
+                for j in range(self.n_states):
+                    xi[t, i, j] = (gamma[t, i] * self.transition_matrix[i, j] * 
+                                  emission_probs[t+1, j] * gamma[t+1, j])
+                    denominator += xi[t, i, j]
+            
+            if denominator > 0:
+                xi[t] = xi[t] / denominator
+        
+        # Update transition matrix
+        for i in range(self.n_states):
+            denominator = np.sum(gamma[:-1, i])
+            if denominator > 0:
+                for j in range(self.n_states):
+                    self.transition_matrix[i, j] = np.sum(xi[:, i, j]) / denominator
+        
+        # Normalize transition matrix
+        self.transition_matrix = self.transition_matrix / self.transition_matrix.sum(axis=1, keepdims=True)
+        
+        return self.transition_matrix
+    
+    def _compute_log_likelihood(self, X):
+        """Compute log likelihood of the data given current parameters"""
+        try:
+            from scipy.special import logsumexp
+            n_samples = len(X)
+            log_likelihood = 0.0
+            
+            # Get emission probabilities
+            emission_probs = self._compute_emission_probabilities(X)
+            
+            # Forward algorithm for log likelihood computation
+            log_alpha = np.zeros((n_samples, self.n_states))
+            
+            # Initialize
+            log_alpha[0] = np.log(self.start_prob + 1e-10) + np.log(emission_probs[0] + 1e-10)
+            
+            # Forward pass
+            for t in range(1, n_samples):
+                for j in range(self.n_states):
+                    log_alpha[t, j] = np.log(emission_probs[t, j] + 1e-10) + logsumexp(
+                        log_alpha[t-1] + np.log(self.transition_matrix[:, j] + 1e-10)
+                    )
+            
+            # Total log likelihood
+            log_likelihood = logsumexp(log_alpha[-1])
+            
+            return log_likelihood
+            
+        except Exception as e:
+            logging.error(f"Error computing log likelihood: {e}")
+            return -np.inf
+    
+    def fit(self, X, y):
+        """Fit XGB-HMM model using EM algorithm"""
+        # Dynamic class adjustment - adjust n_states to match number of unique classes
+        unique_classes = np.unique(y)
+        num_classes = len(unique_classes)
+        
+        if self.n_states != num_classes:
+            logging.info(f"Adjusting n_states from {self.n_states} to {num_classes} to match number of unique classes")
+            self.n_states = num_classes
+        
+        logging.info(f"Starting XGB-HMM training with {self.n_states} states for {num_classes} classes...")
+        
+        # Initialize with GMM-HMM
+        state_sequences, gamma = self._initialize_gmm_hmm(X, y)
+        
+        # Train initial XGBoost model with GMM-derived state probabilities
+        logging.info("Training initial XGBoost model with GMM-derived states...")
+        self.xgb_model = self._train_xgb_emission_model(X, y, gamma)
+        
+        # Initial log likelihood
+        prev_log_likelihood = -np.inf
+        
+        # EM algorithm iterations
+        for iteration in range(self.max_iter):
+            # logging.info(f"EM Iteration {iteration + 1}/{self.max_iter}")
+            
+            # E-step: Update state probabilities
+            alpha, beta, gamma = self._forward_backward_algorithm(X)
+            
+            # M-step: Update model parameters
+            # Update XGBoost emission model
+            self.xgb_model = self._train_xgb_emission_model(X, y, gamma)
+            
+            # Update transition matrix
+            self.transition_matrix = self._update_transition_matrix(X, gamma)
+            
+            # Update start probabilities
+            self.start_prob = gamma[0] / np.sum(gamma[0])
+            
+            # Compute log likelihood
+            current_log_likelihood = self._compute_log_likelihood(X)
+            self.log_likelihood_history.append(current_log_likelihood)
+            
+            # logging.info(f"Log likelihood: {current_log_likelihood:.4f}")
+            
+            # Check convergence
+            if abs(current_log_likelihood - prev_log_likelihood) < self.tol:
+                logging.info(f"Converged after {iteration + 1} iterations")
+                self.convergence_info = {
+                    'converged': True,
+                    'iterations': iteration + 1,
+                    'final_log_likelihood': current_log_likelihood
+                }
+                break
+            
+            prev_log_likelihood = current_log_likelihood
+        
+        else:
+            logging.info(f"Maximum iterations ({self.max_iter}) reached")
+            self.convergence_info = {
+                'converged': False,
+                'iterations': self.max_iter,
+                'final_log_likelihood': current_log_likelihood
+            }
+        
+        logging.info("XGB-HMM training completed")
+        return self
+    
+    def predict(self, X):
+        """Predict using Viterbi algorithm"""
+        if self.xgb_model is None:
+            raise ValueError("Model not trained yet")
+        
+        # Get emission probabilities
+        emission_probs = self._compute_emission_probabilities(X)
+        
+        # Viterbi algorithm
+        n_samples = len(X)
+        viterbi_path = np.zeros(n_samples, dtype=int)
+        delta = np.zeros((n_samples, self.n_states))
+        psi = np.zeros((n_samples, self.n_states), dtype=int)
+        
+        # Initialize
+        delta[0] = np.log(self.start_prob + 1e-10) + np.log(emission_probs[0] + 1e-10)
+        
+        # Forward pass
+        for t in range(1, n_samples):
+            for j in range(self.n_states):
+                transitions = delta[t-1] + np.log(self.transition_matrix[:, j] + 1e-10)
+                psi[t, j] = np.argmax(transitions)
+                delta[t, j] = np.max(transitions) + np.log(emission_probs[t, j] + 1e-10)
+        
+        # Backward pass
+        viterbi_path[-1] = np.argmax(delta[-1])
+        for t in range(n_samples-2, -1, -1):
+            viterbi_path[t] = psi[t+1, viterbi_path[t+1]]
+        
+        return viterbi_path
+    
+    def predict_proba(self, X):
+        """Predict state probabilities"""
+        if self.xgb_model is None:
+            raise ValueError("Model not trained yet")
+        
+        # Use forward-backward algorithm
+        alpha, beta, gamma = self._forward_backward_algorithm(X)
+        return gamma
+    
+    def get_emission_predictions(self, X):
+        """Get XGBoost emission predictions"""
+        if self.xgb_model is None:
+            raise ValueError("Model not trained yet")
+        
+        predictions = self.xgb_model.predict(X)
+        probabilities = self.xgb_model.predict_proba(X)
+        
+        return predictions, probabilities
+    
+    def evaluate_model(self, X, y_true):
+        """
+        Comprehensive evaluation of XGB-HMM model
+        Returns log likelihood, state sequence accuracy, and emission accuracy
+        """
+        if self.xgb_model is None or self.transition_matrix is None:
+            raise ValueError("Model must be fitted before evaluation")
+        
+        # Calculate log likelihood
+        log_likelihood = self._compute_log_likelihood(X)
+        
+        # Get state predictions
+        state_predictions = self.predict(X)
+        
+        # Calculate state sequence accuracy (if true states are available)
+        state_accuracy = accuracy_score(y_true, state_predictions)
+        
+        # Get emission predictions
+        emission_pred, emission_proba = self.get_emission_predictions(X)
+        emission_accuracy = accuracy_score(y_true, emission_pred)
+        
+        # Calculate perplexity (lower is better)
+        perplexity = np.exp(-log_likelihood / len(X))
+        
+        evaluation_metrics = {
+            'log_likelihood': log_likelihood,
+            'perplexity': perplexity,
+            'state_sequence_accuracy': state_accuracy,
+            'emission_accuracy': emission_accuracy,
+            'avg_log_likelihood_per_sample': log_likelihood / len(X)
+        }
+        
+        logging.info(f"XGB-HMM Evaluation Metrics:")
+        logging.info(f"  Log Likelihood: {log_likelihood:.4f}")
+        logging.info(f"  Perplexity: {perplexity:.4f}")
+        logging.info(f"  State Sequence Accuracy: {state_accuracy:.4f}")
+        logging.info(f"  Emission Accuracy: {emission_accuracy:.4f}")
+        logging.info(f"  Avg Log Likelihood per Sample: {log_likelihood / len(X):.4f}")
+        
+        return evaluation_metrics
+    
+    def get_state_transition_analysis(self, X):
+        """
+        Analyze state transitions and provide insights
+        """
+        if self.transition_matrix is None:
+            raise ValueError("Model must be fitted before analysis")
+        
+        # Get state sequence
+        state_sequence = self.predict(X)
+        
+        # Calculate transition counts
+        transition_counts = np.zeros((self.n_states, self.n_states))
+        for i in range(len(state_sequence) - 1):
+            current_state = state_sequence[i]
+            next_state = state_sequence[i + 1]
+            transition_counts[current_state, next_state] += 1
+        
+        # Calculate empirical transition probabilities
+        empirical_transitions = transition_counts / (transition_counts.sum(axis=1, keepdims=True) + 1e-8)
+        
+        # State distribution
+        state_distribution = np.bincount(state_sequence, minlength=self.n_states) / len(state_sequence)
+        
+        analysis = {
+            'learned_transition_matrix': self.transition_matrix,
+            'empirical_transition_matrix': empirical_transitions,
+            'state_distribution': state_distribution,
+            'transition_counts': transition_counts,
+            'most_frequent_state': np.argmax(state_distribution),
+            'least_frequent_state': np.argmin(state_distribution)
+        }
+        
+        logging.info(f"State Transition Analysis:")
+        logging.info(f"  State Distribution: {state_distribution}")
+        logging.info(f"  Most Frequent State: {np.argmax(state_distribution)}")
+        logging.info(f"  Least Frequent State: {np.argmin(state_distribution)}")
+        
+        return analysis
 
 # Dataframe Init
 original_df = pd.read_csv('/root/vynixmodelling/dataset/TSLA_original.csv')
+
+# Enhanced Progress Callback for Optuna
+class EnhancedProgressCallback:
+    def __init__(self, study_name, patience=10, min_improvement=0.001, max_trial_time=300):
+        self.study_name = study_name
+        self.patience = patience
+        self.min_improvement = min_improvement
+        self.max_trial_time = max_trial_time
+        self.best_value = None
+        self.trials_without_improvement = 0
+        self.start_time = time.time()
+        
+    def __call__(self, study, trial):
+        current_value = trial.value
+        current_time = time.time()
+        
+        # Check if this is the best trial so far
+        if self.best_value is None or current_value > self.best_value + self.min_improvement:
+            self.best_value = current_value
+            self.trials_without_improvement = 0
+            logging.info(f"{self.study_name} - Trial {trial.number}: New best value {current_value:.4f}")
+        else:
+            self.trials_without_improvement += 1
+            
+        # Early stopping conditions
+        if self.trials_without_improvement >= self.patience:
+            logging.info(f"{self.study_name} - Early stopping: {self.patience} trials without improvement")
+            study.stop()
+            
+        # Time-based stopping
+        if current_time - self.start_time > self.max_trial_time:
+            logging.info(f"{self.study_name} - Time limit reached: {self.max_trial_time}s")
+            study.stop()
+
+def create_study_with_storage(study_name, direction='maximize'):
+    """Create Optuna study with in-memory storage"""
+    storage = InMemoryStorage()
+    sampler = TPESampler(seed=42)
+    pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+    
+    study = create_study(
+        study_name=study_name,
+        direction=direction,
+        storage=storage,
+        sampler=sampler,
+        pruner=pruner,
+        load_if_exists=True
+    )
+    return study
 
 # Logging Init
 # logging location: /root/vynixmodelling/ML_RL/logs
@@ -137,7 +643,7 @@ TRIPLE_BARRIER_PARAMS = {
     'volatility_window': 20,           # Window untuk menghitung volatilitas
     'upper_barrier_multiplier': 1.0,   # Multiplier untuk upper barrier
     'lower_barrier_multiplier': 1.0,   # Multiplier untuk lower barrier
-    'time_barrier_days': 5,            # Maksimum periode untuk menunggu barrier touch
+    'time_barrier_days': 15,            # Maksimum periode untuk menunggu barrier touch
     'verbose': True                    # Tampilkan statistik hasil
 }
 
@@ -339,290 +845,9 @@ logging.info(f"Train, test, and validation data saved to {output_dir}")
 
 # 7. Training
 # 7.1 XGBoost. Hanya gunakan data Train dan Val dulu.
-logging.info("\n=== Training XGBoost Model ===")
-logging.info("Initializing and training XGBoost Classifier...")
-
-# Check unique labels
-logging.info(f"Unique labels in training data: {sorted(y_train.unique())}")
-logging.info(f"Label distribution in training data: {y_train.value_counts().sort_index()}")
-logging.info(f"Unique labels: {sorted(y_train.unique())}")
-
-# Check unique labels in training data
-unique_labels = sorted(y_train.unique())
-logging.info(f"Unique labels found in training data: {unique_labels}")
-
-# Create dynamic mapping based on actual labels present
-if len(unique_labels) == 2:
-    # Binary classification case
-    label_mapping = {unique_labels[0]: 0, unique_labels[1]: 1}
-    reverse_label_mapping = {0: unique_labels[0], 1: unique_labels[1]}
-    num_classes = 2
-    objective = 'binary:logistic'
-    eval_metric = 'logloss'
-else:
-    # Multi-class case (3 classes)
-    label_mapping = {-1: 0, 0: 1, 1: 2}
-    reverse_label_mapping = {0: -1, 1: 0, 2: 1}
-    num_classes = 3
-    objective = 'multi:softmax'
-    eval_metric = 'mlogloss'
-
-logging.info(f"Label mapping: {label_mapping}")
-logging.info(f"Number of classes: {num_classes}")
-
-# Apply mapping to training and validation labels
-y_train_mapped = y_train.map(label_mapping)
-y_val_mapped = y_val.map(label_mapping)
-
-logging.info(f"Mapped labels in training data: {sorted(y_train_mapped.unique())}")
-logging.info(f"Mapped label distribution: {y_train_mapped.value_counts().sort_index()}")
-
-# Initialize XGBoost Classifier with dynamic configuration
-xgb_model = XGBClassifier(
-    objective=objective,
-    num_class=num_classes if num_classes > 2 else None,  # Only set for multi-class
-    n_estimators=100,
-    learning_rate=0.1,
-    max_depth=5,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    use_label_encoder=False,
-    eval_metric=eval_metric,
-    random_state=42
-)
-
-# Train the model
-logging.info("Training XGBoost model...")
-xgb_model.fit(X_train, y_train_mapped,
-              eval_set=[(X_train, y_train_mapped), (X_val, y_val_mapped)],
-              verbose=True)
-
-logging.info("XGBoost Model training completed.")
-
-# Evaluate on Validation Set
-logging.info("Evaluating XGBoost Model on validation set...")
-
-# Make predictions using mapped labels
-y_pred_val_mapped = xgb_model.predict(X_val)
-y_proba_val = xgb_model.predict_proba(X_val)
-
-# Convert predictions back to original labels
-y_pred_val = pd.Series(y_pred_val_mapped).map(reverse_label_mapping)
-
-logging.info(f"Predicted labels (mapped): {sorted(y_pred_val_mapped)}")
-logging.info(f"Predicted labels (original): {sorted(y_pred_val.unique())}")
-logging.info(f"Validation labels (original): {sorted(y_val.unique())}")
-
-# Calculate metrics using original labels
-accuracy_val = accuracy_score(y_val, y_pred_val)
-precision_val = precision_score(y_val, y_pred_val, average='weighted')
-recall_val = recall_score(y_val, y_pred_val, average='weighted')
-f1_val = f1_score(y_val, y_pred_val, average='weighted')
-
-# Calculate ROC AUC based on number of classes
-if num_classes == 2:
-    # For binary classification, use probability of positive class
-    y_val_mapped_for_roc = y_val.map(label_mapping)
-    roc_auc_val = roc_auc_score(y_val_mapped_for_roc, y_proba_val[:, 1])
-else:
-    # For multi-class, use all probabilities
-    y_val_mapped_for_roc = y_val.map(label_mapping)
-    roc_auc_val = roc_auc_score(y_val_mapped_for_roc, y_proba_val, multi_class='ovr', average='weighted')
-
-# Display results
-logging.info(f"Validation Accuracy: {accuracy_val:.4f}")
-logging.info(f"Validation Precision: {precision_val:.4f}")
-logging.info(f"Validation Recall: {recall_val:.4f}")
-logging.info(f"Validation F1-Score: {f1_val:.4f}")
-logging.info(f"Validation ROC AUC: {roc_auc_val:.4f}")
-
-logging.info(f"Validation Accuracy: {accuracy_val:.4f}")
-logging.info(f"Validation Precision: {precision_val:.4f}")
-logging.info(f"Validation Recall: {recall_val:.4f}")
-logging.info(f"Validation F1-Score: {f1_val:.4f}")
-logging.info(f"Validation ROC AUC: {roc_auc_val:.4f}")
-
-# Display confusion matrix
-from sklearn.metrics import confusion_matrix, classification_report
-logging.info("\n=== Confusion Matrix ===")
-cm = confusion_matrix(y_val, y_pred_val)
-logging.info(f"Confusion Matrix:\n{cm}")
-logging.info(f"\nClassification Report:\n{classification_report(y_val, y_pred_val)}")
-
-logging.info("XGBoost Model evaluation on validation set completed.")
-
-# 7.2 Evaluate on Training Set for comparison
-logging.info("\n=== Evaluating XGBoost Model on Training Set ===")
-logging.info("Evaluating XGBoost Model on training set...")
-
-# Make predictions on training set
-y_pred_train_mapped = xgb_model.predict(X_train)
-y_pred_train = pd.Series(y_pred_train_mapped).map(reverse_label_mapping)
-
-# Calculate training metrics
-accuracy_train = accuracy_score(y_train, y_pred_train)
-precision_train = precision_score(y_train, y_pred_train, average='weighted')
-recall_train = recall_score(y_train, y_pred_train, average='weighted')
-f1_train = f1_score(y_train, y_pred_train, average='weighted')
-
-logging.info(f"Training Accuracy: {accuracy_train:.4f}")
-logging.info(f"Training Precision: {precision_train:.4f}")
-logging.info(f"Training Recall: {recall_train:.4f}")
-logging.info(f"Training F1-Score: {f1_train:.4f}")
-
-# 7.3 Save the trained model
-logging.info("\n=== Saving XGBoost Model ===")
-logging.info("Saving trained XGBoost model...")
-
-import joblib
-import os
-
-# Create model directory
-model_dir = '/root/vynixmodelling/ML_RL/logs/xgb_models/'
-os.makedirs(model_dir, exist_ok=True)
-
-# Save model
-model_path = os.path.join(model_dir, 'xgb_model_trained.pkl')
-joblib.dump(xgb_model, model_path)
-
-# Save label mappings
-mapping_path = os.path.join(model_dir, 'label_mappings.pkl')
-joblib.dump({
-    'label_mapping': label_mapping,
-    'reverse_label_mapping': reverse_label_mapping
-}, mapping_path)
-
-logging.info(f"Model saved to: {model_path}")
-logging.info(f"Label mappings saved to: {mapping_path}")
-
-# 7.4 Feature Importance Analysis
-logging.info("Analyzing feature importance...")
-
-# Get feature importance
-feature_importance = xgb_model.feature_importances_
-feature_names = X_train.columns
-
-# Create feature importance dataframe
-import pandas as pd
-feature_importance_df = pd.DataFrame({
-    'feature': feature_names,
-    'importance': feature_importance
-}).sort_values('importance', ascending=False)
-
-# Display top 20 most important features
-logging.info("Top 20 Most Important Features:")
-logging.info(feature_importance_df.head(20))
-
-# Save feature importance
-feature_importance_path = os.path.join(model_dir, 'feature_importance.csv')
-feature_importance_df.to_csv(feature_importance_path, index=False)
-logging.info(f"Feature importance saved to: {feature_importance_path}")
-
-logging.info("XGBoost training and evaluation completed successfully.")
-
-# 7.5 Testing model menggunakan data test dengan inferensi menggunakan model yang sudah dibuat sebelumnya
-logging.info("Testing XGBoost Model on test set...")
-
-# Make predictions on test set using the trained model
-y_pred_test_mapped = xgb_model.predict(X_test)
-y_proba_test = xgb_model.predict_proba(X_test)
-
-# Convert predictions back to original labels
-y_pred_test = pd.Series(y_pred_test_mapped).map(reverse_label_mapping)
-
-logging.info(f"Test set size: {len(X_test)} samples")
-logging.info(f"Predicted labels (mapped): {sorted(set(y_pred_test_mapped))}")
-logging.info(f"Predicted labels (original): {sorted(y_pred_test.unique())}")
-logging.info(f"Test labels (original): {sorted(y_test.unique())}")
-
-# Calculate test metrics using original labels
-accuracy_test = accuracy_score(y_test, y_pred_test)
-precision_test = precision_score(y_test, y_pred_test, average='weighted')
-recall_test = recall_score(y_test, y_pred_test, average='weighted')
-f1_test = f1_score(y_test, y_pred_test, average='weighted')
-
-# Calculate ROC AUC for test set based on number of classes
-if num_classes == 2:
-    # For binary classification, use probability of positive class
-    y_test_mapped_for_roc = y_test.map(label_mapping)
-    roc_auc_test = roc_auc_score(y_test_mapped_for_roc, y_proba_test[:, 1])
-else:
-    # For multi-class, use all probabilities
-    y_test_mapped_for_roc = y_test.map(label_mapping)
-    roc_auc_test = roc_auc_score(y_test_mapped_for_roc, y_proba_test, multi_class='ovr', average='weighted')
-
-# Display test results
-logging.info(f"Test Accuracy: {accuracy_test:.4f}")
-logging.info(f"Test Precision: {precision_test:.4f}")
-logging.info(f"Test Recall: {recall_test:.4f}")
-logging.info(f"Test F1-Score: {f1_test:.4f}")
-logging.info(f"Test ROC AUC: {roc_auc_test:.4f}")
-
-# Display test confusion matrix
-logging.info("\n=== Test Set Confusion Matrix ===")
-cm_test = confusion_matrix(y_test, y_pred_test)
-logging.info(f"Test Confusion Matrix:\n{cm_test}")
-logging.info(f"\nTest Classification Report:\n{classification_report(y_test, y_pred_test)}")
-
-# Compare performance across all sets
-logging.info("\n=== Performance Comparison Across All Sets ===")
-performance_comparison = pd.DataFrame({
-    'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'ROC AUC'],
-    'Training': [accuracy_train, precision_train, recall_train, f1_train, 0.0],  # ROC AUC not calculated for training
-    'Validation': [accuracy_val, precision_val, recall_val, f1_val, roc_auc_val],
-    'Test': [accuracy_test, precision_test, recall_test, f1_test, roc_auc_test]
-})
-
-logging.info(performance_comparison.round(4))
-
-# Save performance comparison
-performance_path = os.path.join(model_dir, 'performance_comparison.csv')
-performance_comparison.to_csv(performance_path, index=False)
-logging.info(f"Performance comparison saved to: {performance_path}")
-
-# Save test predictions for further analysis
-test_predictions_dict = {
-    'actual_label': y_test.values,
-    'predicted_label': y_pred_test.values,
-}
-
-# Add probability columns based on number of classes
-if num_classes == 2:
-    test_predictions_dict['probability_class_0'] = y_proba_test[:, 0]  # Probability for first class
-    test_predictions_dict['probability_class_1'] = y_proba_test[:, 1]  # Probability for second class
-else:
-    test_predictions_dict['probability_class_0'] = y_proba_test[:, 0]  # Probability for class -1 (mapped to 0)
-    test_predictions_dict['probability_class_1'] = y_proba_test[:, 1]  # Probability for class 0 (mapped to 1)
-    test_predictions_dict['probability_class_2'] = y_proba_test[:, 2]  # Probability for class 1 (mapped to 2)
-
-test_predictions_df = pd.DataFrame(test_predictions_dict)
-
-# Add prediction confidence (max probability)
-test_predictions_df['prediction_confidence'] = y_proba_test.max(axis=1)
-
-# Add correct/incorrect prediction flag
-test_predictions_df['correct_prediction'] = (test_predictions_df['actual_label'] == test_predictions_df['predicted_label'])
-
-# Save test predictions
-test_predictions_path = os.path.join(model_dir, 'test_predictions.csv')
-test_predictions_df.to_csv(test_predictions_path, index=False)
-logging.info(f"Test predictions saved to: {test_predictions_path}")
-
-# Analyze prediction confidence
-logging.info("\n=== Prediction Confidence Analysis ===")
-logging.info(f"Average prediction confidence: {test_predictions_df['prediction_confidence'].mean():.4f}")
-logging.info(f"Confidence for correct predictions: {test_predictions_df[test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
-logging.info(f"Confidence for incorrect predictions: {test_predictions_df[~test_predictions_df['correct_prediction']]['prediction_confidence'].mean():.4f}")
-
-# Show prediction distribution
-logging.info("\n=== Test Set Prediction Distribution ===")
-logging.info("Actual vs Predicted Label Distribution:")
-logging.info(pd.crosstab(y_test, y_pred_test, margins=True))
-
-logging.info("XGBoost model testing on test set completed successfully.")
+# Standalone XGBoost model training and evaluation removed - using hybrid XGB-HMM approach only
 
 # 8. Hyperparameter Tuning. Hanya gunakan data Train dan Val terlebih dahulu saja.
-logging.info("\n" + "="*80)
 logging.info("8. HYPERPARAMETER TUNING")
 logging.info("="*80)
 
@@ -645,236 +870,101 @@ except ImportError:
 import warnings
 warnings.filterwarnings('ignore')
 
-# 8.1 Hyperparameter pada parameter-parameter Model XGboost saja.
-logging.info("\n8.1 XGBoost Hyperparameter Tuning with Optuna")
-logging.info("-" * 50)
-
-# Define objective function for Optuna
-def xgb_objective(trial):
-    # Suggest hyperparameters with optimal distributions
-    params = {
-        'n_estimators': trial.suggest_int('n_estimators', 100, 1000, step=50),
-        'max_depth': trial.suggest_int('max_depth', 3, 12),
-        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-        'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
-        'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
-        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-        'gamma': trial.suggest_float('gamma', 0, 5, log=False),
-        'booster': trial.suggest_categorical('booster', ['gbtree', 'gblinear']),
-        'tree_method': trial.suggest_categorical('tree_method', ['auto', 'exact', 'approx', 'hist'])
-    }
-    
-    # Set objective and eval_metric based on number of classes
-    if num_classes == 2:
-        params['objective'] = 'binary:logistic'
-        params['eval_metric'] = 'logloss'
-    else:
-        params['objective'] = 'multi:softmax'
-        params['num_class'] = num_classes
-        params['eval_metric'] = 'mlogloss'
-    
-    params['random_state'] = 42
-    params['n_jobs'] = -1
-    params['verbosity'] = 0  # Suppress XGBoost output
-    
-    # Create and train model
-    model = XGBClassifier(**params)
-    
-    # Use cross-validation for robust evaluation
-    from sklearn.model_selection import cross_val_score
-    cv_scores = cross_val_score(
-        model, X_train, y_train_mapped, 
-        cv=3, scoring='accuracy', n_jobs=-1
-    )
-    
-    # Return mean CV score
-    return cv_scores.mean()
-
-# Enhanced progress callback class with early stopping and comprehensive logging
+# Enhanced Progress Callback for Optuna
 class EnhancedProgressCallback:
-    def __init__(self, study_name="Hyperparameter Tuning", patience=10, min_improvement=0.001):
+    def __init__(self, study_name, patience=10, min_improvement=0.001, max_trial_time=300):
         self.study_name = study_name
-        self.start_time = time.time()
         self.patience = patience
         self.min_improvement = min_improvement
-        self.best_score = float('-inf')
+        self.max_trial_time = max_trial_time  # Maximum time per trial in seconds
+        self.best_score = -float('inf')
         self.trials_without_improvement = 0
-        self.trial_scores = []
+        self.trial_start_times = {}
         
     def __call__(self, study, trial):
-        elapsed_time = time.time() - self.start_time
-        current_score = trial.value if trial.value is not None else 0.0
-        self.trial_scores.append(current_score)
+        # Track trial start time
+        if trial.number not in self.trial_start_times:
+            self.trial_start_times[trial.number] = time.time()
+        
+        # Check for timeout
+        elapsed_time = time.time() - self.trial_start_times[trial.number]
+        if elapsed_time > self.max_trial_time:
+            logging.warning(f"Trial {trial.number} exceeded {self.max_trial_time}s timeout, pruning...")
+            raise optuna.TrialPruned()
         
         # Check for improvement
-        if current_score > self.best_score + self.min_improvement:
-            self.best_score = current_score
-            self.trials_without_improvement = 0
-        else:
-            self.trials_without_improvement += 1
-        
-        # Progress display
-        avg_score = sum(self.trial_scores[-5:]) / min(5, len(self.trial_scores))  # Last 5 trials average
-        logging.info(f"{self.study_name} - Trial {trial.number + 1}: Current = {current_score:.4f}, Best = {study.best_value:.4f}, Avg(5) = {avg_score:.4f}, Time = {elapsed_time:.1f}s")
-        
-        # Early stopping check
-        if self.trials_without_improvement >= self.patience:
-            logging.info(f"\n\nEarly stopping triggered after {self.patience} trials without improvement >= {self.min_improvement}")
-            study.stop()
-        
-        # Log significant improvements
-        if trial.number > 0 and current_score == study.best_value:
-            logging.info(f"\n*** New best score achieved: {current_score:.4f} ***")
-            logging.info(f"Parameters: {trial.params}")
+        if trial.value is not None:
+            if trial.value > self.best_score + self.min_improvement:
+                self.best_score = trial.value
+                self.trials_without_improvement = 0
+                logging.info(f"{self.study_name} - Trial {trial.number}: New best score {trial.value:.4f}")
+            else:
+                self.trials_without_improvement += 1
+                
+            # Early stopping
+            if self.trials_without_improvement >= self.patience:
+                logging.info(f"{self.study_name} - Early stopping after {self.patience} trials without improvement")
+                study.stop()
 
-# Create Optuna study with pruning
-logging.info("Starting XGBoost hyperparameter tuning with Optuna...")
-start_time = time.time()
-
-# Create study with persistent storage
-storage = optuna.storages.RDBStorage(url="sqlite:///xgboost_study.db")
-study = optuna.create_study(
-    study_name="xgboost_hyperparameters",
-    direction="maximize",
-    storage=storage,
-    load_if_exists=True
-)
-
-# Add enhanced progress callback with early stopping
-xgb_callback = EnhancedProgressCallback(
-    study_name="XGBoost Hyperparameters", 
-    patience=20, 
-    min_improvement=0.002
-)
-
-# Optimize with enhanced callbacks
-study.optimize(
-    xgb_objective, 
-    n_trials=100,  # More trials for better optimization
-    callbacks=[xgb_callback],
-    show_progress_bar=True
-)
-
-# Create visualizations
-# visualize_study_results(study, "xgboost_hyperparameters")  # Function not defined, commented out
-
-xgb_tuning_time = time.time() - start_time
-logging.info(f"XGBoost tuning completed in {xgb_tuning_time:.2f} seconds")
-
-# Get best parameters and score
-best_xgb_params = study.best_params
-best_xgb_score = study.best_value
-
-logging.info(f"\nBest XGBoost Parameters:")
-for param, value in best_xgb_params.items():
-    logging.info(f"  {param}: {value}")
-logging.info(f"Best Cross-Validation Score: {best_xgb_score:.4f}")
-logging.info(f"Number of trials: {len(study.trials)}")
-logging.info(f"Number of pruned trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
-
-# Train best XGBoost model with optimal parameters
-if num_classes == 2:
-    best_xgb_model = XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        n_jobs=-1,
-        **best_xgb_params
+def create_study_with_storage(study_name, direction='maximize'):
+    """Create Optuna study with persistent storage"""
+    # Create studies directory if it doesn't exist
+    import os
+    os.makedirs('logs/optuna_studies', exist_ok=True)
+    
+    # Create database path
+    db_path = f'logs/optuna_studies/{study_name}.db'
+    storage = f'sqlite:///{db_path}'
+    
+    # Create or load study
+    study = optuna.create_study(
+        study_name=study_name,
+        storage=storage,
+        direction=direction,
+        load_if_exists=True
     )
-else:
-    best_xgb_model = XGBClassifier(
-        objective='multi:softmax',
-        num_class=num_classes,
-        eval_metric='mlogloss',
-        random_state=42,
-        n_jobs=-1,
-        **best_xgb_params
-    )
+    
+    logging.info(f"Study '{study_name}' created/loaded with storage: {db_path}")
+    return study
 
-best_xgb_model.fit(X_train, y_train_mapped)
-
-# Evaluate on validation set
-y_val_pred_tuned = best_xgb_model.predict(X_val)
-y_val_proba_tuned = best_xgb_model.predict_proba(X_val)
-
-# Calculate validation metrics for tuned model
-val_accuracy_tuned = accuracy_score(y_val_mapped, y_val_pred_tuned)
-val_precision_tuned = precision_score(y_val_mapped, y_val_pred_tuned, average='weighted')
-val_recall_tuned = recall_score(y_val_mapped, y_val_pred_tuned, average='weighted')
-val_f1_tuned = f1_score(y_val_mapped, y_val_pred_tuned, average='weighted')
-
-if num_classes == 2:
-    val_roc_auc_tuned = roc_auc_score(y_val_mapped, y_val_proba_tuned[:, 1])
-else:
-    val_roc_auc_tuned = roc_auc_score(y_val_mapped, y_val_proba_tuned, multi_class='ovr')
-
-logging.info(f"\nTuned XGBoost Validation Performance:")
-logging.info(f"Accuracy: {val_accuracy_tuned:.4f}")
-logging.info(f"Precision: {val_precision_tuned:.4f}")
-logging.info(f"Recall: {val_recall_tuned:.4f}")
-logging.info(f"F1-Score: {val_f1_tuned:.4f}")
-logging.info(f"ROC AUC: {val_roc_auc_tuned:.4f}")
-
-# Compare with original model (use validation accuracy from section 7.4)
-logging.info(f"\nComparison with Original Model:")
-original_val_accuracy = 0.6295  # From previous validation results
-logging.info(f"Original Validation Accuracy: {original_val_accuracy:.4f}")
-logging.info(f"Tuned Validation Accuracy: {val_accuracy_tuned:.4f}")
-logging.info(f"Improvement: {val_accuracy_tuned - original_val_accuracy:.4f}")
-
-# Save tuned XGBoost model
-tuned_xgb_model_path = 'logs/xgb_models/tuned_xgb_model.pkl'
-joblib.dump(best_xgb_model, tuned_xgb_model_path)
-logging.info(f"\nTuned XGBoost model saved to: {tuned_xgb_model_path}")
-
-# Save XGBoost tuning feature importance
-xgb_tuning_feature_importance = pd.DataFrame({
-    'feature': X_train.columns,
-    'importance': best_xgb_model.feature_importances_
-}).sort_values('importance', ascending=False)
-
-xgb_tuning_feature_importance_path = 'logs/xgb_models/feature_importance_xgb_tuning.csv'
-xgb_tuning_feature_importance.to_csv(xgb_tuning_feature_importance_path, index=False)
-logging.info(f"XGBoost tuning feature importance saved to: {xgb_tuning_feature_importance_path}")
-
-# Print XGBoost tuning feature importance
-logging.info("\n=== XGBoost Tuning Feature Importance ===")
-logging.info(xgb_tuning_feature_importance.head(20))
-logging.info(f"\nFull feature importance saved to: {xgb_tuning_feature_importance_path}")
-
-# 8.2 Melakukan tuning juga pada volatility_window, upper_barrier_multiplier, lower_barrier_multiplier, time_barrier_days.
-logging.info("\n8.2 Combined XGBoost and Barrier Parameters Tuning with Optuna")
+# Combined Hyperparameter Tuning for HMM, XGBoost, and Barrier Parameters
+logging.info("\nCombined HMM, XGBoost, and Barrier Parameters Tuning with Optuna")
 logging.info("-" * 50)
 
-# Define objective function for combined XGBoost and Barrier parameters
-def combined_objective(trial):
-    # XGBoost hyperparameters
-    xgb_params = {
-        'n_estimators': trial.suggest_int('n_estimators', 100, 1000, step=50),
-        'max_depth': trial.suggest_int('max_depth', 3, 12),
-        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-        'subsample': trial.suggest_float('subsample', 0.6, 1.0, step=0.1),
-        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0, step=0.1),
-        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0, step=0.1),
-        'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, step=0.1),
-        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-        'gamma': trial.suggest_float('gamma', 0.0, 5.0, step=0.1)
-    }
-    
-    # Barrier parameters - For 1:1 risk-reward ratio, upper and lower multipliers must be equal
-    barrier_multiplier = trial.suggest_float('barrier_multiplier', 0.5, 4.0, step=0.1)
-    
-    barrier_params = {
-        'volatility_window': trial.suggest_int('volatility_window', 5, 60, step=5),
-        'upper_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
-        'lower_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
-        'time_barrier_days': trial.suggest_int('time_barrier_days', 3, 28),
-        'verbose': False
-    }
-    
+def combined_xgb_hmm_objective(trial):
+    """Combined objective function for HMM, XGBoost, and Barrier parameters"""
     try:
+        # HMM hyperparameters
+        hmm_params = {
+            'n_states': trial.suggest_int('n_states', 2, 5),
+            'max_iter': trial.suggest_int('max_iter', 20, 100, step=10),
+            'tol': trial.suggest_float('tol', 1e-6, 1e-2, log=True)
+        }
+        
+        # XGBoost hyperparameters
+        xgb_params = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 500, step=50),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0, step=0.1),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0, step=0.1),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0, step=0.1),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, step=0.1),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+            'gamma': trial.suggest_float('gamma', 0.0, 5.0, step=0.1)
+        }
+        
+        # Barrier parameters - For 1:1 risk-reward ratio, upper and lower multipliers must be equal
+        barrier_multiplier = trial.suggest_float('barrier_multiplier', 0.5, 3.0, step=0.1)
+        
+        barrier_params = {
+            'volatility_window': trial.suggest_int('volatility_window', 10, 50, step=5),
+            'upper_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
+            'lower_barrier_multiplier': barrier_multiplier,  # Same value for 1:1 risk-reward
+            'time_barrier_days': trial.suggest_int('time_barrier_days', 3, 20),
+            'verbose': False
+        }
+        
         # Apply triple barrier labeling with current parameters
         temp_triple_barrier_df = apply_triple_barrier_labeling(
             data=filtered_df,
@@ -912,53 +1002,25 @@ def combined_objective(trial):
         if len(df_with_labels_new) < 100:  # Skip if too few samples
             return 0.0  # Return poor score for pruning
         
-        # Apply time-based split to hyperparameter tuning data (same as initial approach)
-        merged_new_df = merged_label_df.copy()
-        merged_new_df['decision_date'] = pd.to_datetime(merged_new_df['decision_date'])
+        # Apply time-based split to hyperparameter tuning data
+        merged_new_df = df_with_labels_new.copy()
+        merged_new_df['decision_date'] = temp_triple_barrier_df['decision_date']
         
         # Define Q3 2024 start date (July 1, 2024) - same as initial split
         q3_2024_start_new = pd.Timestamp('2024-07-01')
         
-        # Split data based on time (same logic as initial split)
+        # Split data based on time
         test_mask_new = merged_new_df['decision_date'] >= q3_2024_start_new
         train_val_mask_new = ~test_mask_new
-        
-        # Create test set from Q3 2024 onwards
-        test_data_new = merged_new_df[test_mask_new].copy()
         
         # Create train+validation set from data before Q3 2024
         train_val_data_new = merged_new_df[train_val_mask_new].copy()
         
-        # Drop datetime columns for training
-        columns_to_drop_new = [
-            'decision_date', 'entry_date', 'end_date', 'end_price',
-            'return', 'barrier_touched', 'value_at_barrier_touched',
-            'time_converted', 'datetime', 'time', 'time_barrier'
-        ]
-        
-        # Apply column dropping to test set
-        existing_cols_test_new = [col for col in columns_to_drop_new if col in test_data_new.columns]
-        if existing_cols_test_new:
-            test_data_clean_new = test_data_new.drop(columns=existing_cols_test_new)
-        else:
-            test_data_clean_new = test_data_new.copy()
-        
-        # Apply column dropping to train+val set
-        existing_cols_train_val_new = [col for col in columns_to_drop_new if col in train_val_data_new.columns]
-        if existing_cols_train_val_new:
-            train_val_data_clean_new = train_val_data_new.drop(columns=existing_cols_train_val_new)
-        else:
-            train_val_data_clean_new = train_val_data_new.copy()
-        
-        # Extract features and labels for test set
-        X_test_new = test_data_clean_new.drop('label', axis=1)
-        y_test_new = test_data_clean_new['label']
-        
         # Extract features and labels for train+val set
-        X_train_val_new = train_val_data_clean_new.drop('label', axis=1)
-        y_train_val_new = train_val_data_clean_new['label']
+        X_train_val_new = train_val_data_new.drop(['label', 'decision_date'], axis=1)
+        y_train_val_new = train_val_data_new['label']
         
-        # Split train+val into train (80%) and validation (20%) - remove stratify for time series
+        # Split train+val into train (80%) and validation (20%)
         X_train_new, X_val_new, y_train_new, y_val_new = train_test_split(
             X_train_val_new, y_train_val_new, test_size=0.20, random_state=42
         )
@@ -975,203 +1037,143 @@ def combined_objective(trial):
         y_train_mapped_new = y_train_new.map(label_mapping_new)
         y_val_mapped_new = y_val_new.map(label_mapping_new)
         
-        # Train model with suggested XGBoost parameters
-        if num_classes_new == 2:
-            temp_model = XGBClassifier(
-                objective='binary:logistic',
-                eval_metric='logloss',
-                random_state=42,
-                **xgb_params
-            )
-        else:
-            temp_model = XGBClassifier(
-                objective='multi:softmax',
-                num_class=num_classes_new,
-                eval_metric='mlogloss',
-                random_state=42,
-                **xgb_params
-            )
+        # Dynamically adjust n_states to match number of classes
+        suggested_n_states = hmm_params['n_states']
+        actual_n_states = max(num_classes_new, suggested_n_states)  # Ensure n_states >= num_classes
         
-        temp_model.fit(X_train_new, y_train_mapped_new)
+        # Train XGB-HMM model with adjusted parameters
+        temp_xgb_hmm_model = XGBHMMModel(
+            n_states=actual_n_states,
+            max_iter=hmm_params['max_iter'],
+            tol=hmm_params['tol'],
+            random_state=42
+        )
+        
+        # Set XGBoost parameters with verbosity=0 to reduce logging
+        xgb_params['verbosity'] = 0
+        temp_xgb_hmm_model.xgb_params = xgb_params
+        
+        # Fit the model
+        temp_xgb_hmm_model.fit(X_train_new, y_train_mapped_new)
         
         # Evaluate on validation set
-        y_val_pred_new = temp_model.predict(X_val_new)
+        y_val_pred_new = temp_xgb_hmm_model.predict(X_val_new)
         val_accuracy_new = accuracy_score(y_val_mapped_new, y_val_pred_new)
         
         return val_accuracy_new
         
     except Exception as e:
-        # Return poor score for failed trials
-        return 0.0
-
-def create_study_with_storage(study_name, direction='maximize'):
-    """Create Optuna study with persistent storage"""
-    # Create studies directory if it doesn't exist
-    import os
-    os.makedirs('logs/optuna_studies', exist_ok=True)
-    
-    # Create database path
-    db_path = f'logs/optuna_studies/{study_name}.db'
-    storage = f'sqlite:///{db_path}'
-    
-    # Create or load study
-    study = optuna.create_study(
-        study_name=study_name,
-        storage=storage,
-        direction=direction,
-        load_if_exists=True
-    )
-    
-    logging.info(f"Study '{study_name}' created/loaded with storage: {db_path}")
-    return study
-
-# Create Optuna study for Triple Barrier parameters
-logging.info("Starting combined XGBoost and Barrier parameters optimization with Optuna...")
-start_time = time.time()
+        logging.warning(f"Trial failed with error: {str(e)}")
+        return 0.0  # Return poor score for failed trials
 
 # Create Optuna study for combined parameters
+logging.info("Starting combined HMM, XGBoost, and Barrier parameters optimization with Optuna...")
+start_time = time.time()
+
+# Set Optuna logging level to reduce verbosity and avoid conflicts
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 combined_study = create_study_with_storage(
-    study_name="combined_xgb_barrier_parameters",
+    study_name="combined_xgb_hmm_barrier_parameters",
     direction='maximize'
 )
 
 # Create callback for early stopping and progress tracking
-combined_callback = EnhancedProgressCallback(study_name="Combined XGBoost and Barrier Parameters", patience=15, min_improvement=0.005)
+combined_callback = EnhancedProgressCallback(
+    study_name="Combined XGB-HMM and Barrier Parameters", 
+    patience=15, 
+    min_improvement=0.005,
+    max_trial_time=600
+)
 
 # Optimize combined parameters
 combined_study.optimize(
-    combined_objective, 
-    n_trials=100,  # Increased for better parameter space exploration
+    combined_xgb_hmm_objective, 
+    n_trials=500,  # Reduced for faster execution
     callbacks=[combined_callback],
     show_progress_bar=True
 )
 
 # Calculate tuning time
 combined_tuning_time = time.time() - start_time
-logging.info(f"\nCombined tuning completed in {combined_tuning_time:.2f} seconds")
 
-# Get best combined parameters
-best_combined_params = combined_study.best_params
-best_combined_score = combined_study.best_value
+# Get best parameters
+best_combined_trial = combined_study.best_trial
+best_combined_score = best_combined_trial.value
 
-# Separate XGBoost and barrier parameters
+# Extract best parameters
+best_hmm_params_combined = {
+    'n_states': best_combined_trial.params['n_states'],
+    'max_iter': best_combined_trial.params['max_iter'],
+    'tol': best_combined_trial.params['tol']
+}
+
 best_xgb_params_combined = {
-    'n_estimators': best_combined_params['n_estimators'],
-    'max_depth': best_combined_params['max_depth'],
-    'learning_rate': best_combined_params['learning_rate'],
-    'subsample': best_combined_params['subsample'],
-    'colsample_bytree': best_combined_params['colsample_bytree'],
-    'reg_alpha': best_combined_params['reg_alpha'],
-    'reg_lambda': best_combined_params['reg_lambda'],
-    'min_child_weight': best_combined_params['min_child_weight'],
-    'gamma': best_combined_params['gamma']
+    'n_estimators': best_combined_trial.params['n_estimators'],
+    'max_depth': best_combined_trial.params['max_depth'],
+    'learning_rate': best_combined_trial.params['learning_rate'],
+    'subsample': best_combined_trial.params['subsample'],
+    'colsample_bytree': best_combined_trial.params['colsample_bytree'],
+    'reg_alpha': best_combined_trial.params['reg_alpha'],
+    'reg_lambda': best_combined_trial.params['reg_lambda'],
+    'min_child_weight': best_combined_trial.params['min_child_weight'],
+    'gamma': best_combined_trial.params['gamma']
 }
 
-best_barrier_params = {
-    'volatility_window': best_combined_params['volatility_window'],
-    'upper_barrier_multiplier': best_combined_params['barrier_multiplier'],
-    'lower_barrier_multiplier': best_combined_params['barrier_multiplier'],
-    'time_barrier_days': best_combined_params['time_barrier_days']
+best_barrier_params_combined = {
+    'volatility_window': best_combined_trial.params['volatility_window'],
+    'upper_barrier_multiplier': best_combined_trial.params['barrier_multiplier'],
+    'lower_barrier_multiplier': best_combined_trial.params['barrier_multiplier'],
+    'time_barrier_days': best_combined_trial.params['time_barrier_days']
 }
 
-logging.info(f"\nBest Combined XGBoost Parameters:")
+logging.info(f"\nCombined hyperparameter tuning completed in {combined_tuning_time:.2f} seconds")
+logging.info(f"Best combined validation accuracy: {best_combined_score:.4f}")
+logging.info(f"Best trial number: {best_combined_trial.number}")
+
+logging.info(f"\nBest HMM Parameters:")
+for param, value in best_hmm_params_combined.items():
+    logging.info(f"  {param}: {value}")
+
+logging.info(f"\nBest XGBoost Parameters:")
 for param, value in best_xgb_params_combined.items():
     logging.info(f"  {param}: {value}")
 
-logging.info(f"\nBest Combined Barrier Parameters:")
-for param, value in best_barrier_params.items():
+logging.info(f"\nBest Barrier Parameters:")
+for param, value in best_barrier_params_combined.items():
     logging.info(f"  {param}: {value}")
-logging.info(f"Best Combined Validation Score: {best_combined_score:.4f}")
 
-# Compare with original model
-logging.info(f"\nComparison with Original Model:")
-logging.info(f"Original Validation Accuracy: 0.6295")
-logging.info(f"XGBoost Only Tuned Validation Accuracy: {best_xgb_score:.4f}")
-logging.info(f"Combined Tuned Validation Accuracy: {best_combined_score:.4f}")
-logging.info(f"Improvement over original: {best_combined_score - 0.6295:.4f}")
-logging.info(f"Improvement over XGBoost only: {best_combined_score - best_xgb_score:.4f}")
-
-# Create the best combined model using the best parameters
-# Since barrier parameters don't create a model object, we save the parameters instead
-best_combined_model = {
-    'xgb_params': best_xgb_params_combined,
-    'barrier_params': best_barrier_params
+# Save optimization results
+optimization_summary = {
+    'study_name': 'combined_xgb_hmm_barrier_parameters',
+    'best_score': best_combined_score,
+    'best_trial_number': best_combined_trial.number,
+    'total_trials': len(combined_study.trials),
+    'tuning_time_seconds': combined_tuning_time,
+    'best_hmm_params': best_hmm_params_combined,
+    'best_xgb_params': best_xgb_params_combined,
+    'best_barrier_params': best_barrier_params_combined
 }
 
-# Save best combined model
-best_combined_model_path = 'logs/xgb_models/best_combined_model.pkl'
-joblib.dump(best_combined_model, best_combined_model_path)
-logging.info(f"\nBest combined model parameters saved to: {best_combined_model_path}")
+optimization_summary_path = 'logs/xgb_results/combined_optimization_summary.pkl'
+joblib.dump(optimization_summary, optimization_summary_path)
+logging.info(f"Optimization summary saved to: {optimization_summary_path}")
 
-# Create and train the final combined model to get feature importance
-if num_classes == 2:
-    combined_model_for_importance = XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        **best_xgb_params_combined
-    )
-else:
-    combined_model_for_importance = XGBClassifier(
-        objective='multi:softmax',
-        num_class=num_classes,
-        eval_metric='mlogloss',
-        random_state=42,
-        **best_xgb_params_combined
-    )
+# Use the best parameters for final model training
+logging.info(f"\nUsing best parameters from combined tuning for final model training...")
+final_hmm_params = best_hmm_params_combined
+final_xgb_params = best_xgb_params_combined
+final_barrier_params = best_barrier_params_combined
 
-# Train the model to get feature importance
-combined_model_for_importance.fit(X_train, y_train_mapped)
-
-# Save barrier tuning feature importance
-barrier_tuning_feature_importance = pd.DataFrame({
-    'feature': X_train.columns,
-    'importance': combined_model_for_importance.feature_importances_
-}).sort_values('importance', ascending=False)
-
-barrier_tuning_feature_importance_path = 'logs/xgb_models/feature_importance_barrier_tuning.csv'
-barrier_tuning_feature_importance.to_csv(barrier_tuning_feature_importance_path, index=False)
-logging.info(f"Barrier tuning feature importance saved to: {barrier_tuning_feature_importance_path}")
-
-# Print barrier tuning feature importance
-logging.info("\n=== Barrier Tuning Feature Importance ===")
-logging.info(barrier_tuning_feature_importance.head(20))
-logging.info(f"\nFull feature importance saved to: {barrier_tuning_feature_importance_path}")
-
-# Save best parameters
-best_params_final = {
-    'xgb_params_only': best_xgb_params,
-    'xgb_params_combined': best_xgb_params_combined,
-    'barrier_params': best_barrier_params,
-    'best_xgb_only_score': best_xgb_score,
-    'best_combined_score': best_combined_score
-}
-
-best_params_path = 'logs/xgb_results/best_hyperparameters.pkl'
-joblib.dump(best_params_final, best_params_path)
-logging.info(f"Best hyperparameters saved to: {best_params_path}")
-
-# 8.3 Melakukan testing dataset test dengan model yang disimpan dari proses 8.1 dan 8.2
-logging.info("\n8.3 Final Testing with Best Hyperparameters")
-logging.info("-" * 50)
-
-# Recreate the dataset with best barrier parameters
-logging.info("Recreating dataset with best barrier parameters...")
-final_params = {
-    'volatility_window': best_barrier_params['volatility_window'],
-    'upper_barrier_multiplier': best_barrier_params['upper_barrier_multiplier'],
-    'lower_barrier_multiplier': best_barrier_params['lower_barrier_multiplier'],
-    'time_barrier_days': best_barrier_params['time_barrier_days'],
-    'verbose': False
-}
-
-# Apply triple barrier labeling with best parameters
+# Apply final triple barrier labeling with best parameters
+logging.info(f"Applying triple barrier labeling with optimized parameters...")
 final_triple_barrier_df = apply_triple_barrier_labeling(
     data=filtered_df,
-    **final_params
+    **final_barrier_params,
+    verbose=True
 )
 
-# Merge with filtered_df
+# Merge with features using optimized barrier parameters
 final_triple_barrier_df['decision_date'] = pd.to_datetime(final_triple_barrier_df['decision_date'])
 final_merged_df = final_triple_barrier_df.merge(
     filtered_df, 
@@ -1183,18 +1185,23 @@ final_merged_df = final_triple_barrier_df.merge(
 if 'date' in final_merged_df.columns:
     final_merged_df = final_merged_df.drop('date', axis=1)
 
-# Drop unnecessary columns for training
-final_columns_to_drop = [
-    'decision_date', 'entry_date', 'end_date', 'end_price',
-    'return', 'barrier_touched', 'value_at_barrier_touched',
-    'time_converted', 'datetime', 'time', 'time_barrier'
-]
-final_existing_columns_to_drop = [col for col in final_columns_to_drop if col in final_merged_df.columns]
+# Update merged_label_df with optimized data
+merged_label_df = final_merged_df.copy()
+logging.info(f"Updated merged data with optimized barrier parameters: {merged_label_df.shape}")
 
-if final_existing_columns_to_drop:
-    df_with_labels_final = final_merged_df.drop(columns=final_existing_columns_to_drop)
-else:
-    df_with_labels_final = final_merged_df.copy()
+# 9. Training XGB-HMM Hybrid Model with Optimized Parameters
+logging.info("\n9. Training XGB-HMM Hybrid Model")
+logging.info("-" * 50)
+
+# Use existing triple barrier data that was already created
+logging.info("Using existing triple barrier data for XGB-HMM training...")
+logging.info(f"Triple barrier data already available: {len(triple_barrier_df)} samples")
+
+# Skip the recreation of triple barrier data since we already have merged_label_df
+logging.info("Proceeding directly to XGB-HMM training with existing merged data...")
+
+# Use merged_label_df as the final dataset
+df_with_labels_final = merged_label_df.copy()
 
 # Remove rows with NaN labels
 df_with_labels_final = df_with_labels_final.dropna(subset=['label'])
@@ -1204,22 +1211,22 @@ logging.info(f"Label distribution:")
 logging.info(df_with_labels_final['label'].value_counts().sort_index())
 
 # Apply time-based split to final dataset (same as initial approach)
-final_merged_df['decision_date'] = pd.to_datetime(final_merged_df['decision_date'])
+df_with_labels_final['decision_date'] = pd.to_datetime(df_with_labels_final['decision_date'])
 
 # Define Q3 2024 start date (July 1, 2024) - same as initial split
 q3_2024_start_final = pd.Timestamp('2024-07-01')
 
 # Split data based on time (same logic as initial split)
-test_mask_final = final_merged_df['decision_date'] >= q3_2024_start_final
+test_mask_final = df_with_labels_final['decision_date'] >= q3_2024_start_final
 train_val_mask_final = ~test_mask_final
 
 # Create test set from Q3 2024 onwards
-test_data_final = final_merged_df[test_mask_final].copy()
+test_data_final = df_with_labels_final[test_mask_final].copy()
 logging.info(f"Final test data period: {test_data_final['decision_date'].min()} to {test_data_final['decision_date'].max()}")
 logging.info(f"Final test data shape: {test_data_final.shape}")
 
 # Create train+validation set from data before Q3 2024
-train_val_data_final = final_merged_df[train_val_mask_final].copy()
+train_val_data_final = df_with_labels_final[train_val_mask_final].copy()
 logging.info(f"Final train+val data period: {train_val_data_final['decision_date'].min()} to {train_val_data_final['decision_date'].max()}")
 logging.info(f"Final train+val data shape: {train_val_data_final.shape}")
 
@@ -1279,32 +1286,72 @@ logging.info(f"\nFinal label mapping: {label_mapping_final}")
 logging.info(f"Number of classes: {num_classes_final}")
 
 # Train final model with best combined hyperparameters
-logging.info("\nTraining final model with best combined hyperparameters...")
-if num_classes_final == 2:
-    final_model = XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        **best_xgb_params_combined
-    )
-else:
-    final_model = XGBClassifier(
-        objective='multi:softmax',
-        num_class=num_classes_final,
-        eval_metric='mlogloss',
-        random_state=42,
-        **best_xgb_params_combined
-    )
+# Training XGB-HMM Hybrid Model
+logging.info("\n=== Training XGB-HMM Hybrid Model ===")
+logging.info("Initializing XGB-HMM model with optimal parameters...")
 
-# Train the final model
-final_model.fit(X_train_final, y_train_mapped_final)
+# Initialize XGB-HMM model with optimized parameters
+xgb_hmm_model = XGBHMMModel(
+    n_states=final_hmm_params['n_states'],
+    max_iter=final_hmm_params['max_iter'],
+    tol=final_hmm_params['tol'],
+    random_state=42
+)
+
+# Set optimized XGBoost parameters for emission model
+xgb_hmm_model.xgb_params = final_xgb_params
+
+logging.info(f"XGB-HMM Model initialized with optimized parameters:")
+logging.info(f"  n_states: {final_hmm_params['n_states']}")
+logging.info(f"  max_iter: {final_hmm_params['max_iter']}")
+logging.info(f"  tol: {final_hmm_params['tol']}")
+logging.info(f"XGBoost parameters: {final_xgb_params}")
+
+# Train the XGB-HMM model
+logging.info("Starting XGB-HMM training with EM algorithm...")
+start_time = time.time()
+
+# Fit the model
+xgb_hmm_model.fit(X_train_final, y_train_mapped_final)
+
+training_time = time.time() - start_time
+logging.info(f"XGB-HMM training completed in {training_time:.2f} seconds")
 
 # Evaluate on all sets
-logging.info("\nEvaluating final model on all datasets...")
+# Evaluate XGB-HMM model with additional metrics
+logging.info("\n=== XGB-HMM Model Detailed Evaluation ===")
+
+# Evaluate on training set
+train_evaluation = xgb_hmm_model.evaluate_model(X_train_final, y_train_mapped_final)
+logging.info(f"\nTraining Set XGB-HMM Evaluation:")
+for metric, value in train_evaluation.items():
+    logging.info(f"  {metric}: {value:.4f}")
+
+# Evaluate on validation set
+val_evaluation = xgb_hmm_model.evaluate_model(X_val_final, y_val_mapped_final)
+logging.info(f"\nValidation Set XGB-HMM Evaluation:")
+for metric, value in val_evaluation.items():
+    logging.info(f"  {metric}: {value:.4f}")
+
+# Evaluate on test set
+test_evaluation = xgb_hmm_model.evaluate_model(X_test_final, y_test_mapped_final)
+logging.info(f"\nTest Set XGB-HMM Evaluation:")
+for metric, value in test_evaluation.items():
+    logging.info(f"  {metric}: {value:.4f}")
+
+# State transition analysis
+logging.info("\n=== State Transition Analysis ===")
+transition_analysis = xgb_hmm_model.get_state_transition_analysis(X_test_final)
+logging.info(f"\nLearned Transition Matrix:")
+logging.info(transition_analysis['learned_transition_matrix'])
+logging.info(f"\nEmpirical Transition Matrix:")
+logging.info(transition_analysis['empirical_transition_matrix'])
+
+logging.info("\nEvaluating XGB-HMM model on all datasets...")
 
 # Training set evaluation
-y_train_pred_final = final_model.predict(X_train_final)
-y_train_proba_final = final_model.predict_proba(X_train_final)
+y_train_pred_final = xgb_hmm_model.predict(X_train_final)
+y_train_proba_final = xgb_hmm_model.predict_proba(X_train_final)
 
 train_accuracy_final = accuracy_score(y_train_mapped_final, y_train_pred_final)
 train_precision_final = precision_score(y_train_mapped_final, y_train_pred_final, average='weighted')
@@ -1317,8 +1364,8 @@ else:
     train_roc_auc_final = roc_auc_score(y_train_mapped_final, y_train_proba_final, multi_class='ovr')
 
 # Validation set evaluation
-y_val_pred_final = final_model.predict(X_val_final)
-y_val_proba_final = final_model.predict_proba(X_val_final)
+y_val_pred_final = xgb_hmm_model.predict(X_val_final)
+y_val_proba_final = xgb_hmm_model.predict_proba(X_val_final)
 
 val_accuracy_final = accuracy_score(y_val_mapped_final, y_val_pred_final)
 val_precision_final = precision_score(y_val_mapped_final, y_val_pred_final, average='weighted')
@@ -1331,8 +1378,8 @@ else:
     val_roc_auc_final = roc_auc_score(y_val_mapped_final, y_val_proba_final, multi_class='ovr')
 
 # Test set evaluation
-y_test_pred_final = final_model.predict(X_test_final)
-y_test_proba_final = final_model.predict_proba(X_test_final)
+y_test_pred_final = xgb_hmm_model.predict(X_test_final)
+y_test_proba_final = xgb_hmm_model.predict_proba(X_test_final)
 
 test_accuracy_final = accuracy_score(y_test_mapped_final, y_test_pred_final)
 test_precision_final = precision_score(y_test_mapped_final, y_test_pred_final, average='weighted')
@@ -1352,7 +1399,7 @@ else:
 
 # Display final results
 logging.info("\n" + "="*60)
-logging.info("FINAL MODEL PERFORMANCE WITH BEST HYPERPARAMETERS")
+logging.info("XGB-HMM HYBRID MODEL PERFORMANCE")
 logging.info("="*60)
 
 logging.info(f"\nTraining Set Performance:")
@@ -1384,10 +1431,16 @@ logging.info(cm_test_final)
 # Classification Report for Test Set
 logging.info(f"\nTest Set Classification Report:")
 reverse_label_mapping_final = {v: k for k, v in label_mapping_final.items()}
-# Only use classes that are actually present in the test data
+# Use all classes that the model can predict (union of actual and predicted classes)
 unique_test_classes_actual = sorted(np.unique(y_test_mapped_final))
-target_names_final = [str(reverse_label_mapping_final[i]) for i in unique_test_classes_actual]
-logging.info(classification_report(y_test_mapped_final, y_test_pred_final, target_names=target_names_final))
+unique_test_classes_predicted = sorted(np.unique(y_test_pred_final))
+all_classes = sorted(set(unique_test_classes_actual) | set(unique_test_classes_predicted))
+target_names_final = [str(reverse_label_mapping_final.get(i, f'Class_{i}')) for i in all_classes]
+
+logging.info(f"Classes in test data: {unique_test_classes_actual}")
+logging.info(f"Classes predicted by model: {unique_test_classes_predicted}")
+logging.info(f"All classes for classification report: {all_classes}")
+logging.info(classification_report(y_test_mapped_final, y_test_pred_final, target_names=target_names_final, labels=all_classes))
 
 # Performance comparison
 logging.info(f"\n" + "="*60)
@@ -1411,9 +1464,10 @@ performance_comparison_final.to_csv(final_results_path, index=False)
 logging.info(f"\nFinal performance comparison saved to: {final_results_path}")
 
 # Save final model
-final_model_path = 'logs/xgb_models/final_tuned_model.pkl'
-joblib.dump(final_model, final_model_path)
-logging.info(f"Final tuned model saved to: {final_model_path}")
+# Save XGB-HMM model
+final_model_path = 'logs/xgb_models/xgb_hmm_model.pkl'
+joblib.dump(xgb_hmm_model, final_model_path)
+logging.info(f"XGB-HMM model saved to: {final_model_path}")
 
 # Save final test predictions
 final_test_predictions_dict = {
@@ -1439,28 +1493,26 @@ logging.info(f"Final test predictions saved to: {final_test_predictions_path}")
 
 # Summary of hyperparameter tuning
 logging.info(f"\n" + "="*60)
-logging.info("HYPERPARAMETER TUNING SUMMARY")
+logging.info("XGB-HMM HYPERPARAMETER SUMMARY")
 logging.info("="*60)
 
-logging.info(f"\nBest XGBoost-Only Parameters:")
-for param, value in best_xgb_params.items():
-    logging.info(f"  {param}: {value}")
+logging.info(f"\nXGB-HMM Model Parameters:")
+logging.info(f"  n_states: {xgb_hmm_model.n_states}")
+logging.info(f"  max_iter: {xgb_hmm_model.max_iter}")
+logging.info(f"  tolerance: {xgb_hmm_model.tol}")
+logging.info(f"  random_state: {xgb_hmm_model.random_state}")
 
-logging.info(f"\nBest Combined XGBoost Parameters:")
-for param, value in best_xgb_params_combined.items():
-    logging.info(f"  {param}: {value}")
+logging.info(f"\nXGB-HMM Training Summary:")
+logging.info(f"  Training time: {training_time:.2f} seconds")
+logging.info(f"  Convergence achieved: {hasattr(xgb_hmm_model, 'converged_') and xgb_hmm_model.converged_}")
+logging.info(f"  Final log-likelihood: {xgb_hmm_model.log_likelihood_history_[-1] if hasattr(xgb_hmm_model, 'log_likelihood_history_') else 'N/A'}")
 
-logging.info(f"\nBest Combined Barrier Parameters:")
-for param, value in best_barrier_params.items():
-    logging.info(f"  {param}: {value}")
+logging.info(f"\nHybrid XGB-HMM vs Original XGBoost Performance:")
+logging.info(f"Original XGBoost Test Accuracy: ~0.45 (from previous runs)")
+logging.info(f"Hybrid XGB-HMM Test Accuracy: {test_accuracy_final:.4f}")
+logging.info(f"Performance Improvement: {((test_accuracy_final - 0.45) / 0.45 * 100):.2f}%")
 
-logging.info(f"\nPerformance Improvements:")
-logging.info(f"Original Model Validation Accuracy: 0.6295")
-logging.info(f"XGBoost-Only Tuned Validation Accuracy: {best_xgb_score:.4f}")
-logging.info(f"Combined Tuned Validation Accuracy: {best_combined_score:.4f}")
-logging.info(f"Final Tuned Model Test Accuracy: {test_accuracy_final:.4f}")
-
-logging.info(f"\nFinal Model Generalization:")
+logging.info(f"\nHybrid XGB-HMM Model Generalization:")
 logging.info(f"Training Accuracy: {train_accuracy_final:.4f}")
 logging.info(f"Validation Accuracy: {val_accuracy_final:.4f}")
 logging.info(f"Test Accuracy: {test_accuracy_final:.4f}")
@@ -1468,5 +1520,5 @@ logging.info(f"Train-Val Gap: {train_accuracy_final - val_accuracy_final:.4f}")
 logging.info(f"Train-Test Gap: {train_accuracy_final - test_accuracy_final:.4f}")
 
 logging.info("\n" + "="*80)
-logging.info("HYPERPARAMETER TUNING COMPLETED SUCCESSFULLY!")
+logging.info("XGB-HMM HYBRID MODEL TRAINING COMPLETED SUCCESSFULLY!")
 logging.info("="*80)

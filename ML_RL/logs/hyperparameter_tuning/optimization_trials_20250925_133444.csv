@@ -1,0 +1,2 @@
+number,value,datetime_start,datetime_complete,duration,params_colsample_bytree,params_learning_rate,params_max_depth,params_max_iter,params_n_estimators,params_n_states,params_reg_alpha,params_reg_lambda,params_subsample,params_tol,state
+0,0.0,2025-09-25 13:34:45.008211,2025-09-25 13:34:45.965136,0 days 00:00:00.956925,0.9464704583099741,0.01700037298921102,4,97,319,3,6.011150117432088,7.10991852018085,0.6232334448672797,0.0008471801418819979,COMPLETE

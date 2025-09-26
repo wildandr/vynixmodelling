@@ -1,0 +1,18 @@
+XGB-HMM Hyperparameter Optimization Summary
+==================================================
+
+Total trials: 5
+Best cross-validation score: 0.5022
+Best trial number: 1
+
+Best hyperparameters:
+  n_states: 2
+  max_iter: 98
+  tol: 0.002136832907235877
+  n_estimators: 145
+  learning_rate: 0.01855998084649059
+  max_depth: 4
+  subsample: 0.7216968971838151
+  colsample_bytree: 0.8099025726528951
+  reg_alpha: 4.319450186421157
+  reg_lambda: 2.983168487960615
